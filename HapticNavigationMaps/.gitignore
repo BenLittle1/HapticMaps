@@ -1,0 +1,23 @@
+# Build artifacts
+*.o
+*.build
+DerivedData/
+build/
+
+# User-specific files
+*.xcuserstate
+xcuserdata/
+*.xcuserdata
+
+# Xcode project files (keep project.pbxproj but exclude user-specific)
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.pbxuser
+
+# macOS
+.DS_Store
+.DS_Store?
+
+# Other
+.localized
