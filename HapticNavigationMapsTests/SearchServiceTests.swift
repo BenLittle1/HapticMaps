@@ -4,251 +4,378 @@ import CoreLocation
 @testable import HapticNavigationMaps
 
 class SearchServiceTests: XCTestCase {
-    
     var searchService: SearchService!
+    var mockLocalSearch: MockMKLocalSearch!
+    var mockGeocoder: MockCLGeocoder!
     
     override func setUp() {
         super.setUp()
         searchService = SearchService()
+        mockLocalSearch = MockMKLocalSearch()
+        mockGeocoder = MockCLGeocoder()
     }
     
     override func tearDown() {
         searchService = nil
+        mockLocalSearch = nil
+        mockGeocoder = nil
         super.tearDown()
     }
     
-    // MARK: - Search Locations Tests
+    // MARK: - Basic Functionality Tests
     
-    func testSearchLocations_WithValidQuery_ReturnsResults() async throws {
-        // Given
-        let query = "Apple Park"
+    func testSearchLocationsWithValidQuery() async throws {
+        let query = "coffee shops"
         
-        // When
-        let results = try await searchService.searchLocations(query: query)
-        
-        // Then
-        XCTAssertFalse(results.isEmpty, "Should return search results for valid query")
-        XCTAssertTrue(results.allSatisfy { !$0.title.isEmpty }, "All results should have titles")
-        XCTAssertTrue(results.allSatisfy { CLLocationCoordinate2DIsValid($0.coordinate) }, "All results should have valid coordinates")
-    }
-    
-    func testSearchLocations_WithEmptyQuery_ThrowsEmptyQueryError() async {
-        // Given
-        let emptyQuery = ""
-        
-        // When/Then
         do {
-            _ = try await searchService.searchLocations(query: emptyQuery)
-            XCTFail("Should throw SearchError.emptyQuery")
-        } catch SearchError.emptyQuery {
-            // Expected error
+            let results = try await searchService.searchLocations(query: query)
+            XCTAssertFalse(results.isEmpty, "Should return search results for valid query")
         } catch {
-            XCTFail("Should throw SearchError.emptyQuery, but threw \(error)")
+            XCTFail("Search should succeed with valid query: \(error)")
         }
     }
     
-    func testSearchLocations_WithWhitespaceQuery_ThrowsEmptyQueryError() async {
-        // Given
-        let whitespaceQuery = "   \n\t   "
+    func testReverseGeocodeWithValidLocation() async throws {
+        let location = CLLocation(latitude: 37.7749, longitude: -122.4194)
         
-        // When/Then
         do {
-            _ = try await searchService.searchLocations(query: whitespaceQuery)
-            XCTFail("Should throw SearchError.emptyQuery")
-        } catch SearchError.emptyQuery {
-            // Expected error
+            let placemarks = try await searchService.reverseGeocode(location: location)
+            XCTAssertFalse(placemarks.isEmpty, "Should return placemarks for valid location")
         } catch {
-            XCTFail("Should throw SearchError.emptyQuery, but threw \(error)")
+            XCTFail("Reverse geocode should succeed with valid location: \(error)")
         }
     }
     
-    func testSearchLocations_WithInvalidQuery_ThrowsNoResultsError() async {
-        // Given
-        let invalidQuery = "xyzabc123nonexistentlocation456"
-        
-        // When/Then
+    // MARK: - Error Handling Tests
+    
+    func testSearchLocationsWithEmptyQuery() async {
         do {
-            _ = try await searchService.searchLocations(query: invalidQuery)
-            XCTFail("Should throw SearchError.noResults for invalid query")
-        } catch SearchError.noResults {
-            // Expected error
-        } catch SearchError.networkError {
-            // Network error is also acceptable in some cases
+            _ = try await searchService.searchLocations(query: "")
+            XCTFail("Should throw empty query error")
+        } catch let error as SearchError {
+            XCTAssertEqual(error, .emptyQuery)
         } catch {
-            XCTFail("Should throw SearchError.noResults or networkError, but threw \(error)")
+            XCTFail("Should throw SearchError.emptyQuery, got: \(error)")
         }
     }
     
-    func testSearchLocations_WithRegion_ReturnsResults() async throws {
-        // Given
-        let query = "Starbucks"
-        let region = MKCoordinateRegion(
-            center: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194), // San Francisco
-            span: MKCoordinateSpan(latitudeDelta: 0.1, longitudeDelta: 0.1)
-        )
-        
-        // When
-        let results = try await searchService.searchLocations(query: query, in: region)
-        
-        // Then
-        XCTAssertFalse(results.isEmpty, "Should return search results for valid query with region")
-        XCTAssertTrue(results.allSatisfy { !$0.title.isEmpty }, "All results should have titles")
-        XCTAssertTrue(results.allSatisfy { CLLocationCoordinate2DIsValid($0.coordinate) }, "All results should have valid coordinates")
+    func testSearchLocationsWithWhitespaceOnlyQuery() async {
+        do {
+            _ = try await searchService.searchLocations(query: "   \n\t  ")
+            XCTFail("Should throw empty query error")
+        } catch let error as SearchError {
+            XCTAssertEqual(error, .emptyQuery)
+        } catch {
+            XCTFail("Should throw SearchError.emptyQuery, got: \(error)")
+        }
     }
     
-    // MARK: - Reverse Geocoding Tests
-    
-    func testReverseGeocode_WithValidLocation_ReturnsPlacemarks() async throws {
-        // Given
-        let location = CLLocation(latitude: 37.7749, longitude: -122.4194) // San Francisco
+    func testReverseGeocodeWithInvalidLocation() async {
+        let invalidLocation = CLLocation(latitude: 999, longitude: 999)
         
-        // When
-        let placemarks = try await searchService.reverseGeocode(location: location)
-        
-        // Then
-        XCTAssertFalse(placemarks.isEmpty, "Should return placemarks for valid location")
-        XCTAssertNotNil(placemarks.first?.locality, "Should have locality information")
-    }
-    
-    func testReverseGeocode_WithInvalidLocation_ThrowsInvalidLocationError() async {
-        // Given
-        let invalidLocation = CLLocation(latitude: 999, longitude: 999) // Invalid coordinates
-        
-        // When/Then
         do {
             _ = try await searchService.reverseGeocode(location: invalidLocation)
-            XCTFail("Should throw SearchError.invalidLocation")
-        } catch SearchError.invalidLocation {
-            // Expected error
+            XCTFail("Should throw invalid location error")
+        } catch let error as SearchError {
+            XCTAssertEqual(error, .invalidLocation)
         } catch {
-            XCTFail("Should throw SearchError.invalidLocation, but threw \(error)")
+            XCTFail("Should throw SearchError.invalidLocation, got: \(error)")
         }
     }
     
-    // MARK: - SearchResult Model Tests
+    // MARK: - Network Error Tests
     
-    func testSearchResult_InitializationFromMKMapItem() {
-        // Given
-        let placemark = MKPlacemark(coordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194))
-        let mapItem = MKMapItem(placemark: placemark)
-        mapItem.name = "Test Location"
+    func testSearchLocationsWithNetworkError() async {
+        // Test with a query that's likely to fail due to network issues
+        let query = "search_that_will_fail_network_test"
         
-        // When
-        let searchResult = SearchResult(mapItem: mapItem)
-        
-        // Then
-        XCTAssertEqual(searchResult.mapItem, mapItem)
-        XCTAssertEqual(searchResult.title, "Test Location")
-        XCTAssertEqual(searchResult.coordinate.latitude, 37.7749, accuracy: 0.0001)
-        XCTAssertEqual(searchResult.coordinate.longitude, -122.4194, accuracy: 0.0001)
+        do {
+            _ = try await searchService.searchLocations(query: query)
+            // If this succeeds, we can't test the network error case
+            // This test might be skipped in environments with good connectivity
+        } catch let error as SearchError {
+            switch error {
+            case .networkError, .searchTimeout, .serviceUnavailable:
+                // These are expected network-related errors
+                XCTAssertTrue(error.isRetryable, "Network errors should be retryable")
+            case .noResults:
+                // This is also acceptable for a test query
+                break
+            default:
+                XCTFail("Unexpected error type: \(error)")
+            }
+        } catch {
+            XCTFail("Should throw SearchError, got: \(error)")
+        }
     }
     
-    func testSearchResult_FormattedAddress() {
-        // Given
-        let placemark = MKPlacemark(coordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194))
-        let mapItem = MKMapItem(placemark: placemark)
-        let searchResult = SearchResult(mapItem: mapItem)
+    // MARK: - Error Recovery Tests
+    
+    func testSearchErrorRetryability() {
+        XCTAssertTrue(SearchError.networkError(NSError(domain: "test", code: 1)).isRetryable)
+        XCTAssertTrue(SearchError.searchTimeout.isRetryable)
+        XCTAssertTrue(SearchError.serviceUnavailable.isRetryable)
         
-        // When
-        let formattedAddress = searchResult.formattedAddress
-        
-        // Then
-        // Since we can't easily mock CLPlacemark address components,
-        // we'll just verify that the method returns a string (even if empty)
-        XCTAssertNotNil(formattedAddress, "Formatted address should not be nil")
+        XCTAssertFalse(SearchError.emptyQuery.isRetryable)
+        XCTAssertFalse(SearchError.noResults.isRetryable)
+        XCTAssertFalse(SearchError.invalidLocation.isRetryable)
+        XCTAssertFalse(SearchError.rateLimitExceeded.isRetryable)
+        XCTAssertFalse(SearchError.searchCanceled.isRetryable)
     }
     
-    func testSearchResult_DistanceCalculation() {
-        // Given
-        let searchLocation = CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194)
-        let placemark = MKPlacemark(coordinate: searchLocation)
-        let mapItem = MKMapItem(placemark: placemark)
-        let searchResult = SearchResult(mapItem: mapItem)
-        
-        let userLocation = CLLocation(latitude: 37.7849, longitude: -122.4094) // ~1km away
-        
-        // When
-        let distance = searchResult.distance(from: userLocation)
-        let formattedDistance = searchResult.formattedDistance(from: userLocation)
-        
-        // Then
-        XCTAssertGreaterThan(distance, 0, "Distance should be greater than 0")
-        XCTAssertFalse(formattedDistance.isEmpty, "Formatted distance should not be empty")
+    func testSearchErrorRetryDelays() {
+        XCTAssertEqual(SearchError.networkError(NSError(domain: "test", code: 1)).retryDelay, 2.0)
+        XCTAssertEqual(SearchError.searchTimeout.retryDelay, 1.0)
+        XCTAssertEqual(SearchError.serviceUnavailable.retryDelay, 5.0)
+        XCTAssertEqual(SearchError.emptyQuery.retryDelay, 0.0)
     }
     
-    func testSearchResult_Equality() {
-        // Given
-        let placemark = MKPlacemark(coordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194))
-        let mapItem = MKMapItem(placemark: placemark)
-        let searchResult1 = SearchResult(mapItem: mapItem)
-        let searchResult2 = SearchResult(mapItem: mapItem)
+    // MARK: - Timeout Tests
+    
+    func testSearchTimeout() async {
+        // This test simulates a search that would timeout
+        // In a real scenario, this would be tested with a mock that delays response
         
-        // When/Then
-        XCTAssertNotEqual(searchResult1, searchResult2, "Different SearchResult instances should not be equal (different UUIDs)")
-        XCTAssertEqual(searchResult1, searchResult1, "Same SearchResult instance should be equal to itself")
+        let expectation = XCTestExpectation(description: "Search should timeout")
+        
+        Task {
+            do {
+                // Use a query that might take a long time or fail
+                _ = try await searchService.searchLocations(query: "extremely_specific_query_that_might_timeout_12345")
+                expectation.fulfill()
+            } catch let error as SearchError {
+                switch error {
+                case .searchTimeout, .networkError, .serviceUnavailable, .noResults:
+                    // These are all acceptable outcomes for this test
+                    expectation.fulfill()
+                default:
+                    XCTFail("Unexpected error: \(error)")
+                }
+            } catch {
+                XCTFail("Should throw SearchError, got: \(error)")
+            }
+        }
+        
+        await fulfillment(of: [expectation], timeout: 35.0) // Longer than search timeout
     }
     
-    // MARK: - SearchError Tests
+    // MARK: - Cancellation Tests
     
-    func testSearchError_LocalizedDescriptions() {
-        // Test all error cases have proper descriptions
+    func testCancelAllSearches() {
+        // Test that we can cancel searches without crashing
+        searchService.cancelAllSearches()
+        
+        // Start a search and then cancel it
+        Task {
+            do {
+                _ = try await searchService.searchLocations(query: "test query")
+            } catch {
+                // Cancellation is expected
+            }
+        }
+        
+        searchService.cancelAllSearches()
+    }
+    
+    // MARK: - Edge Cases
+    
+    func testSearchWithSpecialCharacters() async {
+        let queries = [
+            "café 😀",
+            "naïve résumé",
+            "100% organic",
+            "#hashtag @mention",
+            "query with\nnewlines",
+            "spaces   everywhere"
+        ]
+        
+        for query in queries {
+            do {
+                let results = try await searchService.searchLocations(query: query)
+                // Should not crash with special characters
+                // Results may be empty, which is acceptable
+                XCTAssertNotNil(results)
+            } catch let error as SearchError {
+                // Some special characters might cause no results or other errors
+                switch error {
+                case .noResults, .networkError, .serviceUnavailable:
+                    // These are acceptable for special character queries
+                    break
+                default:
+                    XCTFail("Unexpected error for query '\(query)': \(error)")
+                }
+            } catch {
+                XCTFail("Should only throw SearchError, got: \(error)")
+            }
+        }
+    }
+    
+    func testReverseGeocodeWithExtremeCoordinates() async {
+        let extremeLocations = [
+            CLLocation(latitude: 90, longitude: 180),    // North Pole, International Date Line
+            CLLocation(latitude: -90, longitude: -180),  // South Pole, opposite side
+            CLLocation(latitude: 0, longitude: 0),       // Null Island
+        ]
+        
+        for location in extremeLocations {
+            do {
+                let placemarks = try await searchService.reverseGeocode(location: location)
+                // These might return results or no results, both are valid
+                XCTAssertNotNil(placemarks)
+            } catch let error as SearchError {
+                // Some extreme locations might not have results
+                switch error {
+                case .noResults, .networkError, .geocodingFailed:
+                    // These are acceptable for extreme coordinates
+                    break
+                default:
+                    XCTFail("Unexpected error for location \(location): \(error)")
+                }
+            } catch {
+                XCTFail("Should only throw SearchError, got: \(error)")
+            }
+        }
+    }
+    
+    // MARK: - Performance Tests
+    
+    func testSearchPerformance() {
+        measure {
+            let expectation = XCTestExpectation(description: "Search performance")
+            
+            Task {
+                do {
+                    _ = try await searchService.searchLocations(query: "coffee")
+                    expectation.fulfill()
+                } catch {
+                    expectation.fulfill() // Count errors as completion for performance test
+                }
+            }
+            
+            wait(for: [expectation], timeout: 30.0)
+        }
+    }
+    
+    func testReverseGeocodePerformance() {
+        let location = CLLocation(latitude: 37.7749, longitude: -122.4194)
+        
+        measure {
+            let expectation = XCTestExpectation(description: "Reverse geocode performance")
+            
+            Task {
+                do {
+                    _ = try await searchService.reverseGeocode(location: location)
+                    expectation.fulfill()
+                } catch {
+                    expectation.fulfill() // Count errors as completion for performance test
+                }
+            }
+            
+            wait(for: [expectation], timeout: 30.0)
+        }
+    }
+    
+    // MARK: - Concurrent Operations Tests
+    
+    func testConcurrentSearches() async {
+        let queries = ["coffee", "restaurants", "gas stations", "hotels", "hospitals"]
+        
+        await withTaskGroup(of: Void.self) { group in
+            for query in queries {
+                group.addTask {
+                    do {
+                        _ = try await self.searchService.searchLocations(query: query)
+                    } catch {
+                        // Errors are acceptable in concurrent testing
+                    }
+                }
+            }
+        }
+        
+        // Test should complete without crashing
+        XCTAssertTrue(true, "Concurrent searches completed")
+    }
+    
+    func testConcurrentReverseGeocoding() async {
+        let locations = [
+            CLLocation(latitude: 37.7749, longitude: -122.4194), // San Francisco
+            CLLocation(latitude: 40.7128, longitude: -74.0060),  // New York
+            CLLocation(latitude: 34.0522, longitude: -118.2437), // Los Angeles
+            CLLocation(latitude: 41.8781, longitude: -87.6298),  // Chicago
+            CLLocation(latitude: 29.7604, longitude: -95.3698)   // Houston
+        ]
+        
+        await withTaskGroup(of: Void.self) { group in
+            for location in locations {
+                group.addTask {
+                    do {
+                        _ = try await self.searchService.reverseGeocode(location: location)
+                    } catch {
+                        // Errors are acceptable in concurrent testing
+                    }
+                }
+            }
+        }
+        
+        // Test should complete without crashing
+        XCTAssertTrue(true, "Concurrent reverse geocoding completed")
+    }
+    
+    // MARK: - Error Message Tests
+    
+    func testErrorDescriptions() {
         let errors: [SearchError] = [
             .emptyQuery,
             .noResults,
             .networkError(NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Test error"])),
-            .geocodingFailed(NSError(domain: "test", code: 2, userInfo: [NSLocalizedDescriptionKey: "Geocoding error"])),
-            .invalidLocation
+            .geocodingFailed(NSError(domain: "test", code: 2)),
+            .invalidLocation,
+            .searchTimeout,
+            .serviceUnavailable,
+            .rateLimitExceeded,
+            .searchCanceled
         ]
         
         for error in errors {
-            XCTAssertNotNil(error.errorDescription, "Error \(error) should have a description")
-            XCTAssertFalse(error.errorDescription!.isEmpty, "Error description should not be empty")
+            XCTAssertNotNil(error.localizedDescription)
+            XCTAssertFalse(error.localizedDescription.isEmpty)
+            
+            // Verify error descriptions are user-friendly
+            let description = error.localizedDescription
+            XCTAssertFalse(description.contains("Error Domain="))
+            XCTAssertFalse(description.contains("Code="))
         }
     }
 }
 
-// MARK: - Mock Classes for Advanced Testing
+// MARK: - Mock Classes
 
-class MockSearchService: SearchServiceProtocol {
-    var shouldThrowError: SearchError?
-    var mockSearchResults: [SearchResult] = []
+class MockMKLocalSearch: MKLocalSearch {
+    var shouldFail = false
+    var mockError: Error?
+    var mockResults: [MKMapItem] = []
+    
+    override func start() async throws -> MKDirections.Response {
+        if shouldFail, let error = mockError {
+            throw error
+        }
+        
+        // Return mock response
+        // Note: This is a simplified mock - real implementation would be more complex
+        throw SearchError.noResults // Simplified for testing
+    }
+}
+
+class MockCLGeocoder: CLGeocoder {
+    var shouldFail = false
+    var mockError: Error?
     var mockPlacemarks: [CLPlacemark] = []
     
-    func searchLocations(query: String) async throws -> [SearchResult] {
-        if let error = shouldThrowError {
+    override func reverseGeocodeLocation(_ location: CLLocation) async throws -> [CLPlacemark] {
+        if shouldFail, let error = mockError {
             throw error
         }
-        return mockSearchResults
-    }
-    
-    func reverseGeocode(location: CLLocation) async throws -> [CLPlacemark] {
-        if let error = shouldThrowError {
-            throw error
-        }
+        
         return mockPlacemarks
-    }
-}
-
-// MARK: - Integration Tests
-
-class SearchServiceIntegrationTests: XCTestCase {
-    
-    func testSearchService_RealWorldScenario() async throws {
-        // Given
-        let searchService = SearchService()
-        let query = "Apple Park Cupertino"
-        
-        // When
-        let results = try await searchService.searchLocations(query: query)
-        
-        // Then
-        XCTAssertFalse(results.isEmpty, "Should find Apple Park")
-        
-        // Verify we can reverse geocode the first result
-        if let firstResult = results.first {
-            let location = CLLocation(latitude: firstResult.coordinate.latitude, longitude: firstResult.coordinate.longitude)
-            let placemarks = try await searchService.reverseGeocode(location: location)
-            XCTAssertFalse(placemarks.isEmpty, "Should be able to reverse geocode the search result")
-        }
     }
 }

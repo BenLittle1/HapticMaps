@@ -1,6 +1,7 @@
 import SwiftUI
 import MapKit
 import CoreLocation
+import CoreHaptics
 
 /// A card component for displaying turn-by-turn navigation instructions
 struct NavigationCard: View {
@@ -23,21 +24,13 @@ struct NavigationCard: View {
             VStack(spacing: 16) {
                 // Header with mode toggle and stop button
                 HStack {
-                    Button(action: onToggleMode) {
-                        HStack(spacing: 6) {
-                            Image(systemName: currentNavigationMode.iconName)
-                                .font(.system(size: 16, weight: .medium))
-                            
-                            Text(currentNavigationMode.displayName)
-                                .font(.subheadline)
-                                .fontWeight(.medium)
+                    CompactHapticModeToggle(
+                        currentMode: .constant(currentNavigationMode),
+                        isHapticCapable: CHHapticEngine.capabilitiesForHardware().supportsHaptics,
+                        onModeChanged: { _ in
+                            onToggleMode()
                         }
-                        .foregroundColor(.blue)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color.blue.opacity(0.1))
-                        .cornerRadius(16)
-                    }
+                    )
                     
                     Spacer()
                     
@@ -301,9 +294,9 @@ extension NavigationMode {
     var iconName: String {
         switch self {
         case .visual:
-            return "eye"
+            return "eye.fill"
         case .haptic:
-            return "hand.tap"
+            return "hand.tap.fill"
         }
     }
 }

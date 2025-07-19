@@ -34,6 +34,22 @@
 		A1000081 /* NavigationCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000082 /* NavigationCard.swift */; };
 		A1000083 /* NavigationViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000084 /* NavigationViewModel.swift */; };
 		A1000085 /* NavigationInterfaceUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000086 /* NavigationInterfaceUITests.swift */; };
+		A1000087 /* HapticModeToggle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000088 /* HapticModeToggle.swift */; };
+		A1000089 /* HapticNavigationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000090 /* HapticNavigationView.swift */; };
+		A1000091 /* UserPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000092 /* UserPreferences.swift */; };
+		A1000093 /* NavigationModeSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000094 /* NavigationModeSettingsView.swift */; };
+		A1000095 /* HapticNavigationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000096 /* HapticNavigationService.swift */; };
+		A1000097 /* HapticNavigationServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000098 /* HapticNavigationServiceProtocol.swift */; };
+		A1000099 /* NavigationModeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000100 /* NavigationModeUITests.swift */; };
+		A1000101 /* HapticNavigationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000102 /* HapticNavigationServiceTests.swift */; };
+		A1000103 /* HapticNavigationIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000104 /* HapticNavigationIntegrationTests.swift */; };
+		A1000121 /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000120 /* DesignTokens.swift */; };
+		A1000123 /* MapButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000122 /* MapButton.swift */; };
+		A1000125 /* BackgroundNavigationIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000126 /* BackgroundNavigationIntegrationTests.swift */; };
+		A1000127 /* DesignSystemComponentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000128 /* DesignSystemComponentTests.swift */; };
+		A1000129 /* DependencyContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000130 /* DependencyContainer.swift */; };
+		A1000131 /* AppCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000132 /* AppCoordinator.swift */; };
+		A1000133 /* AppIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000134 /* AppIntegrationTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -47,7 +63,6 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		A1000022 /* HapticNavigationMaps.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HapticNavigationMaps.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1000002 /* HapticNavigationMapsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticNavigationMapsApp.swift; sourceTree = "<group>"; };
 		A1000004 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A1000006 /* LocationServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationServiceProtocol.swift; sourceTree = "<group>"; };
@@ -56,9 +71,10 @@
 		A1000012 /* RouteStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteStep.swift; sourceTree = "<group>"; };
 		A1000014 /* HapticPattern.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticPattern.swift; sourceTree = "<group>"; };
 		A1000016 /* SearchResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchResult.swift; sourceTree = "<group>"; };
+		A1000018 /* LocationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationServiceTests.swift; sourceTree = "<group>"; };
+		A1000022 /* HapticNavigationMaps.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HapticNavigationMaps.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1000023 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A1000024 /* HapticNavigationMapsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HapticNavigationMapsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		A1000018 /* LocationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationServiceTests.swift; sourceTree = "<group>"; };
 		A1000052 /* MapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapView.swift; sourceTree = "<group>"; };
 		A1000054 /* MapViewUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapViewUITests.swift; sourceTree = "<group>"; };
 		A1000056 /* SearchServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchServiceProtocol.swift; sourceTree = "<group>"; };
@@ -77,6 +93,23 @@
 		A1000082 /* NavigationCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationCard.swift; sourceTree = "<group>"; };
 		A1000084 /* NavigationViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationViewModel.swift; sourceTree = "<group>"; };
 		A1000086 /* NavigationInterfaceUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationInterfaceUITests.swift; sourceTree = "<group>"; };
+		A1000088 /* HapticModeToggle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticModeToggle.swift; sourceTree = "<group>"; };
+		A1000090 /* HapticNavigationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticNavigationView.swift; sourceTree = "<group>"; };
+		A1000092 /* UserPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserPreferences.swift; sourceTree = "<group>"; };
+		A1000094 /* NavigationModeSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationModeSettingsView.swift; sourceTree = "<group>"; };
+		A1000096 /* HapticNavigationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticNavigationService.swift; sourceTree = "<group>"; };
+		A1000098 /* HapticNavigationServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticNavigationServiceProtocol.swift; sourceTree = "<group>"; };
+		A1000100 /* NavigationModeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationModeUITests.swift; sourceTree = "<group>"; };
+		A1000102 /* HapticNavigationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticNavigationServiceTests.swift; sourceTree = "<group>"; };
+		A1000104 /* HapticNavigationIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticNavigationIntegrationTests.swift; sourceTree = "<group>"; };
+		A1000120 /* DesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTokens.swift; sourceTree = "<group>"; };
+		A1000122 /* MapButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapButton.swift; sourceTree = "<group>"; };
+		A1000124 /* ComponentDocumentation.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = ComponentDocumentation.md; sourceTree = "<group>"; };
+		A1000126 /* BackgroundNavigationIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundNavigationIntegrationTests.swift; sourceTree = "<group>"; };
+		A1000128 /* DesignSystemComponentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystemComponentTests.swift; sourceTree = "<group>"; };
+		A1000130 /* DependencyContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DependencyContainer.swift; sourceTree = "<group>"; };
+		A1000132 /* AppCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCoordinator.swift; sourceTree = "<group>"; };
+		A1000134 /* AppIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIntegrationTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -129,6 +162,12 @@
 				A1000074 /* NavigationEngineTests.swift */,
 				A1000080 /* RouteDisplayIntegrationTests.swift */,
 				A1000086 /* NavigationInterfaceUITests.swift */,
+				A1000100 /* NavigationModeUITests.swift */,
+				A1000102 /* HapticNavigationServiceTests.swift */,
+				A1000104 /* HapticNavigationIntegrationTests.swift */,
+				A1000126 /* BackgroundNavigationIntegrationTests.swift */,
+				A1000128 /* DesignSystemComponentTests.swift */,
+				A1000134 /* AppIntegrationTests.swift */,
 			);
 			name = HapticNavigationMapsTests;
 			path = ../HapticNavigationMapsTests;
@@ -149,6 +188,8 @@
 				A1000004 /* ContentView.swift */,
 				A1000052 /* MapView.swift */,
 				A1000068 /* SearchResultsView.swift */,
+				A1000090 /* HapticNavigationView.swift */,
+				A1000094 /* NavigationModeSettingsView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -162,6 +203,11 @@
 				A1000058 /* SearchService.swift */,
 				A1000070 /* NavigationEngineProtocol.swift */,
 				A1000072 /* NavigationEngine.swift */,
+				A1000098 /* HapticNavigationServiceProtocol.swift */,
+				A1000096 /* HapticNavigationService.swift */,
+				A1000092 /* UserPreferences.swift */,
+				A1000130 /* DependencyContainer.swift */,
+				A1000132 /* AppCoordinator.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -189,11 +235,15 @@
 		A1000035 /* DesignSystem */ = {
 			isa = PBXGroup;
 			children = (
+				A1000120 /* DesignTokens.swift */,
+				A1000122 /* MapButton.swift */,
 				A1000062 /* SearchBar.swift */,
 				A1000064 /* SearchResultRow.swift */,
 				A1000076 /* RouteInfoPanel.swift */,
 				A1000078 /* RouteSelectionPanel.swift */,
 				A1000082 /* NavigationCard.swift */,
+				A1000088 /* HapticModeToggle.swift */,
+				A1000124 /* ComponentDocumentation.md */,
 			);
 			path = DesignSystem;
 			sourceTree = "<group>";
@@ -317,6 +367,16 @@
 				A1000077 /* RouteSelectionPanel.swift in Sources */,
 				A1000081 /* NavigationCard.swift in Sources */,
 				A1000083 /* NavigationViewModel.swift in Sources */,
+				A1000087 /* HapticModeToggle.swift in Sources */,
+				A1000089 /* HapticNavigationView.swift in Sources */,
+				A1000091 /* UserPreferences.swift in Sources */,
+				A1000093 /* NavigationModeSettingsView.swift in Sources */,
+				A1000095 /* HapticNavigationService.swift in Sources */,
+				A1000097 /* HapticNavigationServiceProtocol.swift in Sources */,
+				A1000129 /* DependencyContainer.swift in Sources */,
+				A1000131 /* AppCoordinator.swift in Sources */,
+				A1000121 /* DesignTokens.swift in Sources */,
+				A1000123 /* MapButton.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -330,6 +390,12 @@
 				A1000073 /* NavigationEngineTests.swift in Sources */,
 				A1000079 /* RouteDisplayIntegrationTests.swift in Sources */,
 				A1000085 /* NavigationInterfaceUITests.swift in Sources */,
+				A1000099 /* NavigationModeUITests.swift in Sources */,
+				A1000101 /* HapticNavigationServiceTests.swift in Sources */,
+				A1000103 /* HapticNavigationIntegrationTests.swift in Sources */,
+				A1000125 /* BackgroundNavigationIntegrationTests.swift in Sources */,
+				A1000127 /* DesignSystemComponentTests.swift in Sources */,
+				A1000133 /* AppIntegrationTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -484,7 +550,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.example.HapticNavigationMaps;
+				PRODUCT_BUNDLE_IDENTIFIER = "-----com.BenLittle.HapticNavigationMaps";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -513,7 +579,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.example.HapticNavigationMaps;
+				PRODUCT_BUNDLE_IDENTIFIER = "-----com.BenLittle.HapticNavigationMaps";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;

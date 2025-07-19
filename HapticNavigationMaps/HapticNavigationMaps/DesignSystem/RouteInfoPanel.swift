@@ -8,97 +8,66 @@ struct RouteInfoPanel: View {
     let onDismiss: () -> Void
     
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: DesignTokens.Spacing.lg) {
             // Handle bar
-            RoundedRectangle(cornerRadius: 2.5)
-                .fill(Color(.systemGray4))
-                .frame(width: 36, height: 5)
-                .padding(.top, 8)
+            handleBar()
             
-            // Route information
-            VStack(spacing: 12) {
+            // Route information content
+            VStack(spacing: DesignTokens.Spacing.md) {
+                // Header section
                 HStack {
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
                         Text("Route Information")
-                            .font(.headline)
-                            .foregroundColor(.primary)
+                            .font(DesignTokens.Typography.headline)
+                            .foregroundColor(DesignTokens.Colors.textPrimary)
                         
                         Text("Walking directions")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
+                            .font(DesignTokens.Typography.subheadline)
+                            .foregroundColor(DesignTokens.Colors.textSecondary)
                     }
                     
                     Spacer()
                     
                     Button(action: onDismiss) {
                         Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.secondary)
-                            .font(.system(size: 20))
+                            .foregroundColor(DesignTokens.Colors.textSecondary)
+                            .font(.system(size: DesignTokens.IconSize.md))
                     }
                 }
                 
-                // Time and distance
-                HStack(spacing: 24) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "clock")
-                                .foregroundColor(.blue)
-                                .font(.system(size: 16))
-                            
-                            Text(formattedTravelTime)
-                                .font(.title2)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.primary)
-                        }
-                        
-                        Text("Travel time")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
+                // Route metrics section
+                HStack(spacing: DesignTokens.Spacing.xxl) {
+                    // Travel time metric
+                    RouteMetricView(
+                        icon: "clock",
+                        iconColor: DesignTokens.Colors.primary,
+                        value: formattedTravelTime,
+                        label: "Travel time"
+                    )
                     
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "location")
-                                .foregroundColor(.green)
-                                .font(.system(size: 16))
-                            
-                            Text(formattedDistance)
-                                .font(.title2)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.primary)
-                        }
-                        
-                        Text("Distance")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
+                    // Distance metric
+                    RouteMetricView(
+                        icon: "location",
+                        iconColor: DesignTokens.Colors.success,
+                        value: formattedDistance,
+                        label: "Distance"
+                    )
                     
                     Spacer()
                 }
                 
-                // Start navigation button
-                Button(action: onStartNavigation) {
-                    HStack {
-                        Image(systemName: "location.fill")
-                            .font(.system(size: 16, weight: .medium))
-                        
-                        Text("Start Navigation")
-                            .font(.headline)
-                    }
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(Color.blue)
-                    .cornerRadius(12)
-                }
-                .buttonStyle(PlainButtonStyle())
+                // Start navigation button using MapButton
+                MapButton.primary(
+                    action: onStartNavigation,
+                    icon: "location.fill",
+                    label: "Start Navigation",
+                    size: .large
+                )
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 20)
+            .padding(.horizontal, DesignTokens.Spacing.cardPadding)
+            .padding(.bottom, DesignTokens.Spacing.cardPadding)
         }
-        .background(Color(.systemBackground))
-        .cornerRadius(16, corners: [.topLeft, .topRight])
-        .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: -2)
+        .panelStyle()
     }
     
     private var formattedTravelTime: String {
@@ -111,6 +80,34 @@ struct RouteInfoPanel: View {
     private var formattedDistance: String {
         let formatter = MKDistanceFormatter()
         return formatter.string(fromDistance: route.distance)
+    }
+}
+
+// MARK: - Supporting Views
+
+/// A metric display component for route information
+struct RouteMetricView: View {
+    let icon: String
+    let iconColor: Color
+    let value: String
+    let label: String
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
+            HStack(spacing: DesignTokens.Spacing.sm) {
+                Image(systemName: icon)
+                    .foregroundColor(iconColor)
+                    .font(.system(size: DesignTokens.IconSize.sm))
+                
+                Text(value)
+                    .font(DesignTokens.Typography.title2)
+                    .foregroundColor(DesignTokens.Colors.textPrimary)
+            }
+            
+            Text(label)
+                .font(DesignTokens.Typography.caption1)
+                .foregroundColor(DesignTokens.Colors.textSecondary)
+        }
     }
 }
 
@@ -132,5 +129,5 @@ struct RouteInfoPanel: View {
             }
         )
     }
-    .background(Color(.systemGray6))
+    .background(DesignTokens.Colors.surface)
 }

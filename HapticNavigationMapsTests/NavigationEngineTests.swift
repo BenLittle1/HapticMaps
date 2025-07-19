@@ -211,9 +211,15 @@ class MockNavigationEngine: NavigationEngineProtocol {
         return route
     }
     
-    func startNavigation(route: MKRoute) {
+    func startNavigation(route: MKRoute, mode: NavigationMode = .visual) {
         currentRoute = route
-        navigationState = .navigating(mode: .visual)
+        navigationState = .navigating(mode: mode)
+    }
+    
+    func setNavigationMode(_ mode: NavigationMode) {
+        if case .navigating = navigationState {
+            navigationState = .navigating(mode: mode)
+        }
     }
     
     func updateProgress(location: CLLocation) {
@@ -240,6 +246,11 @@ class MockNavigationEngine: NavigationEngineProtocol {
         currentStep = nil
         routeCalculationError = nil
         navigationState = .idle
+    }
+    
+    func cancelRouteCalculation() {
+        navigationState = .idle
+        routeCalculationError = nil
     }
 }
 

@@ -59,16 +59,10 @@ class NavigationViewModel: ObservableObject {
             return
         }
         
-        let _ = currentMode == .visual ? NavigationMode.haptic : NavigationMode.visual
+        let newMode = currentMode == .visual ? NavigationMode.haptic : NavigationMode.visual
         
-        // Update navigation state with new mode
-        // Note: This would typically be handled by the NavigationEngine
-        // For now, we'll trigger a state change through the engine
-        if let route = currentRoute {
-            navigationEngine.stopNavigation()
-            navigationEngine.startNavigation(route: route)
-            // The actual mode switching logic would be implemented in NavigationEngine
-        }
+        // Update navigation mode through the NavigationEngine
+        navigationEngine.setNavigationMode(newMode)
     }
     
     /// Stop navigation and reset state

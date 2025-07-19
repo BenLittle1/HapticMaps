@@ -9,9 +9,9 @@ enum NavigationState: Equatable {
 }
 
 /// Represents the navigation mode
-enum NavigationMode: CaseIterable {
-    case visual
-    case haptic
+enum NavigationMode: String, CaseIterable {
+    case visual = "visual"
+    case haptic = "haptic"
     
     var displayName: String {
         switch self {

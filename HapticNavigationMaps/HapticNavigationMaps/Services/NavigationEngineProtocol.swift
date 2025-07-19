@@ -12,11 +12,12 @@ protocol NavigationEngineProtocol: ObservableObject {
     var routeCalculationError: NavigationError? { get }
     
     func calculateRoute(to destination: MKMapItem) async throws -> MKRoute
-    func startNavigation(route: MKRoute)
+    func startNavigation(route: MKRoute, mode: NavigationMode)
     func updateProgress(location: CLLocation)
     func stopNavigation()
     func selectRoute(_ route: MKRoute)
     func clearError()
     func clearRoutes()
     func cancelRouteCalculation()
+    func setNavigationMode(_ mode: NavigationMode)
 }

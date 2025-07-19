@@ -1,12 +1,14 @@
 import SwiftUI
 import MapKit
 import CoreLocation
+import CoreHaptics
 
 struct MapView: View {
-    @StateObject private var locationService = LocationService()
-    @StateObject private var searchViewModel = SearchViewModel()
-    @StateObject private var navigationEngine = NavigationEngine()
-    @StateObject private var navigationViewModel: NavigationViewModel
+    @EnvironmentObject var locationService: LocationService
+    @EnvironmentObject var searchViewModel: SearchViewModel
+    @EnvironmentObject var navigationEngine: NavigationEngine
+    @EnvironmentObject var navigationViewModel: NavigationViewModel
+    @EnvironmentObject var userPreferences: UserPreferences
     @State private var cameraPosition: MapCameraPosition = .automatic
     @State private var showingLocationAlert = false
     @State private var selectedAnnotation: SearchResult?
@@ -15,12 +17,7 @@ struct MapView: View {
     @State private var selectedRouteIndex = 0
     @State private var showingRouteError = false
     @State private var routeErrorMessage = ""
-    
-    init() {
-        let engine = NavigationEngine()
-        self._navigationEngine = StateObject(wrappedValue: engine)
-        self._navigationViewModel = StateObject(wrappedValue: NavigationViewModel(navigationEngine: engine))
-    }
+    @State private var showingModeSettings = false
     
     var body: some View {
         ZStack {
@@ -133,6 +130,49 @@ struct MapView: View {
                 }
                 
                 Spacer()
+                
+                // Current Mode Indicator (when not navigating)
+                if case .idle = navigationEngine.navigationState {
+                    VStack {
+                        Spacer()
+                        
+                        HStack {
+                            Spacer()
+                            
+                            Button(action: {
+                                showingModeSettings = true
+                            }) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: userPreferences.preferredNavigationMode.iconName)
+                                        .font(.system(size: 16, weight: .medium))
+                                    
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Default Mode")
+                                            .font(.caption2)
+                                            .foregroundColor(.secondary)
+                                        
+                                        Text(userPreferences.preferredNavigationMode.displayName)
+                                            .font(.caption)
+                                            .fontWeight(.medium)
+                                    }
+                                    
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.secondary)
+                                }
+                                .foregroundColor(userPreferences.preferredNavigationMode == .haptic ? .purple : .blue)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(Color(.systemBackground))
+                                .clipShape(RoundedRectangle(cornerRadius: 20))
+                                .shadow(radius: 2)
+                            }
+                        }
+                        .padding(.trailing, 16)
+                        .padding(.bottom, 20)
+                    }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
             }
             
             // Location permission overlay
@@ -179,9 +219,12 @@ struct MapView: View {
                     
                     RouteInfoPanel(
                         route: route,
-                        onStartNavigation: {
-                            navigationEngine.startNavigation(route: route)
+                                        onStartNavigation: {
+                            // Start navigation with user's preferred mode
+                            let startMode = userPreferences.preferredNavigationMode
+                            navigationEngine.startNavigation(route: route, mode: startMode)
                             showingRouteInfo = false
+                            saveCurrentNavigationState()
                         },
                         onDismiss: {
                             showingRouteInfo = false
@@ -234,26 +277,50 @@ struct MapView: View {
                 .animation(.easeInOut(duration: 0.3), value: navigationEngine.navigationState)
             }
             
-            // Navigation Card - Turn-by-turn interface
-            if case .navigating = navigationEngine.navigationState {
-                VStack {
-                    Spacer()
-                    
-                    NavigationCard(
+            // Navigation Interface - Adaptive based on mode
+            if case .navigating(let mode) = navigationEngine.navigationState {
+                if mode == .haptic {
+                    // Full-screen haptic navigation interface
+                    HapticNavigationView(
                         currentStep: navigationViewModel.currentStep,
                         nextStep: navigationViewModel.nextStep,
                         distanceToNextManeuver: navigationViewModel.distanceToNextManeuver,
                         navigationState: navigationEngine.navigationState,
+                        routeProgress: navigationViewModel.routeProgress,
+                        isHapticCapable: isHapticCapable,
                         onStopNavigation: {
                             navigationViewModel.stopNavigation()
+                            userPreferences.clearNavigationState()
                         },
                         onToggleMode: {
                             navigationViewModel.toggleNavigationMode()
+                            saveCurrentNavigationState()
                         }
                     )
+                    .transition(.opacity.combined(with: .scale))
+                    .zIndex(1) // Ensure it appears above the map
+                } else {
+                    // Standard visual navigation card
+                    VStack {
+                        Spacer()
+                        
+                        NavigationCard(
+                            currentStep: navigationViewModel.currentStep,
+                            nextStep: navigationViewModel.nextStep,
+                            distanceToNextManeuver: navigationViewModel.distanceToNextManeuver,
+                            navigationState: navigationEngine.navigationState,
+                            onStopNavigation: {
+                                navigationViewModel.stopNavigation()
+                                userPreferences.clearNavigationState()
+                            },
+                            onToggleMode: {
+                                navigationViewModel.toggleNavigationMode()
+                                saveCurrentNavigationState()
+                            }
+                        )
+                    }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-                .animation(.easeInOut(duration: 0.3), value: navigationEngine.navigationState)
             }
             
             // Arrival Confirmation
@@ -275,7 +342,6 @@ struct MapView: View {
                     )
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
-                .animation(.easeInOut(duration: 0.3), value: navigationEngine.navigationState)
             }
         }
         .alert("Location Access Required", isPresented: $showingLocationAlert) {
@@ -299,6 +365,13 @@ struct MapView: View {
             }
         } message: {
             Text(routeErrorMessage)
+        }
+        .animation(.easeInOut(duration: 0.3), value: navigationEngine.navigationState)
+        .onChange(of: navigationEngine.navigationState) { _, newState in
+            handleNavigationStateChange(newState)
+        }
+        .sheet(isPresented: $showingModeSettings) {
+            NavigationModeSettingsView()
         }
     }
     
@@ -448,6 +521,65 @@ struct MapView: View {
             routeErrorMessage = error.localizedDescription
         }
         showingRouteError = true
+    }
+    
+    // MARK: - Computed Properties
+    
+    private var isHapticCapable: Bool {
+        CHHapticEngine.capabilitiesForHardware().supportsHaptics
+    }
+    
+    private var currentNavigationMode: NavigationMode {
+        if case .navigating(let mode) = navigationEngine.navigationState {
+            return mode
+        }
+        return userPreferences.preferredNavigationMode
+    }
+    
+    // MARK: - Helper Methods
+    
+    private func saveCurrentNavigationState() {
+        guard let route = navigationEngine.currentRoute else { return }
+        
+        // Create route state for persistence
+        let routeState = NavigationRouteState(
+            from: route,
+            currentStepIndex: navigationViewModel.currentStepIndex,
+            destinationName: selectedAnnotation?.title ?? "Destination"
+        )
+        
+        // Save current state
+        userPreferences.saveNavigationState(
+            route: routeState,
+            mode: currentNavigationMode,
+            progress: navigationViewModel.routeProgress
+        )
+    }
+    
+    private func handleNavigationStateChange(_ newState: NavigationState) {
+        switch newState {
+        case .navigating(let mode):
+            // Update user preferences with current mode
+            userPreferences.preferredNavigationMode = mode
+            saveCurrentNavigationState()
+            
+            // Configure screen behavior for haptic mode
+            if mode == .haptic && userPreferences.keepScreenAwakeInHapticMode {
+                UIApplication.shared.isIdleTimerDisabled = true
+            }
+            
+        case .idle, .arrived:
+            // Re-enable idle timer when navigation stops
+            UIApplication.shared.isIdleTimerDisabled = false
+            
+            // Clear navigation state when stopped
+            if case .idle = newState {
+                userPreferences.clearNavigationState()
+            }
+            
+        case .calculating:
+            break
+        }
     }
 }
 

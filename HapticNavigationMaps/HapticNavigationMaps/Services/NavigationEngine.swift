@@ -2,6 +2,7 @@ import Foundation
 import MapKit
 import CoreLocation
 import Combine
+import CoreHaptics
 
 /// Navigation engine responsible for route calculation and navigation progress tracking
 @MainActor
@@ -20,13 +21,33 @@ class NavigationEngine: NavigationEngineProtocol {
     private var currentLocation: CLLocation?
     private var routeCalculationTask: Task<Void, Never>?
     
+    // MARK: - Haptic Integration Properties
+    private let hapticService: any HapticNavigationServiceProtocol
+    private var lastHapticTriggerDistance: CLLocationDistance = 0
+    private let hapticTriggerDistance: CLLocationDistance = 100 // meters before turn
+    private let hapticMinimumInterval: TimeInterval = 5.0 // seconds between haptic cues
+    private var lastHapticTime: Date = Date.distantPast
+    private var hasTriggeredTurnHaptic = false
+    
     // MARK: - Initialization
-    init() {}
+    init(hapticService: any HapticNavigationServiceProtocol) {
+        self.hapticService = hapticService
+    }
+    
+    convenience init() {
+        self.init(hapticService: HapticNavigationService())
+    }
     
     // MARK: - NavigationEngineProtocol Implementation
     
-    /// Calculate route to destination using MKDirections
+    /// Calculate route to destination using MKDirections with retry logic
     func calculateRoute(to destination: MKMapItem) async throws -> MKRoute {
+        return try await performRouteCalculationWithRetry(to: destination)
+    }
+    
+    private func performRouteCalculationWithRetry(to destination: MKMapItem, attempt: Int = 1) async throws -> MKRoute {
+        let maxRetryAttempts = 3
+        
         // Cancel any existing route calculation
         cancelRouteCalculation()
         
@@ -45,34 +66,10 @@ class NavigationEngine: NavigationEngineProtocol {
         }
         
         do {
-            // Create route calculation with timeout
-            let route = try await withThrowingTaskGroup(of: MKDirections.Response.self) { group in
-                // Add the main route calculation task
-                group.addTask {
-                    let request = MKDirections.Request()
-                    request.source = MKMapItem(placemark: MKPlacemark(coordinate: currentLocation.coordinate))
-                    request.destination = destination
-                    request.transportType = .walking
-                    request.requestsAlternateRoutes = true
-                    
-                    let directions = MKDirections(request: request)
-                    return try await directions.calculate()
-                }
-                
-                // Add timeout task
-                group.addTask {
-                    try await Task.sleep(nanoseconds: 30_000_000_000) // 30 seconds
-                    throw NavigationError.routeCalculationTimeout
-                }
-                
-                // Wait for first result (either success or timeout)
-                guard let response = try await group.next() else {
-                    throw NavigationError.routeCalculationFailed(NSError(domain: "NavigationEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "No response received"]))
-                }
-                
-                group.cancelAll()
-                return response
-            }
+            let route = try await performSingleRouteCalculation(
+                from: currentLocation,
+                to: destination
+            )
             
             guard !route.routes.isEmpty else {
                 navigationState = .idle
@@ -88,17 +85,113 @@ class NavigationEngine: NavigationEngineProtocol {
             
             return route.routes.first!
             
+        } catch let navError as NavigationError {
+            // Handle retryable errors
+            if navError.isRetryable && attempt < maxRetryAttempts {
+                let delay = navError.retryDelay * Double(attempt) // Exponential backoff
+                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                
+                return try await performRouteCalculationWithRetry(
+                    to: destination,
+                    attempt: attempt + 1
+                )
+            } else {
+                // Always reset state on final error
+                navigationState = .idle
+                routeCalculationError = navError
+                throw navError
+            }
         } catch {
-            // Always reset state on error
-            navigationState = .idle
-            let navError = error as? NavigationError ?? NavigationError.routeCalculationFailed(error)
-            routeCalculationError = navError
-            throw navError
+            // Classify and handle unexpected errors
+            let classifiedError = classifyRouteCalculationError(error)
+            
+            if classifiedError.isRetryable && attempt < maxRetryAttempts {
+                let delay = classifiedError.retryDelay * Double(attempt)
+                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                
+                return try await performRouteCalculationWithRetry(
+                    to: destination,
+                    attempt: attempt + 1
+                )
+            } else {
+                navigationState = .idle
+                routeCalculationError = classifiedError
+                throw classifiedError
+            }
+        }
+    }
+    
+    private func performSingleRouteCalculation(
+        from source: CLLocation,
+        to destination: MKMapItem
+    ) async throws -> MKDirections.Response {
+        return try await withThrowingTaskGroup(of: MKDirections.Response.self) { group in
+            // Add the main route calculation task
+            group.addTask {
+                let request = MKDirections.Request()
+                request.source = MKMapItem(placemark: MKPlacemark(coordinate: source.coordinate))
+                request.destination = destination
+                request.transportType = .walking
+                request.requestsAlternateRoutes = true
+                
+                let directions = MKDirections(request: request)
+                return try await directions.calculate()
+            }
+            
+            // Add timeout task
+            group.addTask {
+                try await Task.sleep(nanoseconds: 30_000_000_000) // 30 seconds
+                throw NavigationError.routeCalculationTimeout
+            }
+            
+            // Wait for first result (either success or timeout)
+            guard let response = try await group.next() else {
+                throw NavigationError.routeCalculationFailed(
+                    NSError(domain: "NavigationEngine", code: -1, userInfo: [
+                        NSLocalizedDescriptionKey: "No response received"
+                    ])
+                )
+            }
+            
+            group.cancelAll()
+            return response
+        }
+    }
+    
+    private func classifyRouteCalculationError(_ error: Error) -> NavigationError {
+        let nsError = error as NSError
+        
+        // Check for specific error codes that indicate different types of failures
+        switch nsError.code {
+        case NSURLErrorTimedOut, NSURLErrorCannotConnectToHost:
+            return .routeCalculationTimeout
+        case NSURLErrorNotConnectedToInternet, NSURLErrorNetworkConnectionLost:
+            return .networkError(error)
+        case NSURLErrorBadServerResponse, NSURLErrorCannotFindHost:
+            return .serviceUnavailable
+        case NSURLErrorResourceUnavailable:
+            return .rateLimitExceeded
+        default:
+            // Check domain-specific errors
+            if nsError.domain == MKErrorDomain {
+                switch nsError.code {
+                case Int(MKError.directionsNotFound.rawValue):
+                    return .noRouteFound
+                case Int(MKError.loadingThrottled.rawValue):
+                    return .rateLimitExceeded
+                case Int(MKError.serverFailure.rawValue):
+                    return .serviceUnavailable
+                default:
+                    return .routeCalculationFailed(error)
+                }
+            }
+            
+            return .routeCalculationFailed(error)
         }
     }
     
     /// Start navigation with the provided route
-    func startNavigation(route: MKRoute) {
+    func startNavigation(route: MKRoute, mode: NavigationMode = .visual) {
         currentRoute = route
         currentStepIndex = 0
         routeProgress = 0
@@ -108,7 +201,32 @@ class NavigationEngine: NavigationEngineProtocol {
             currentStep = route.steps[0]
         }
         
-        navigationState = .navigating(mode: .visual)
+        // Initialize haptic engine if needed
+        if mode == .haptic {
+            initializeHapticEngineIfNeeded()
+            hapticService.startNavigationBackgroundTask()
+        }
+        
+        // Reset haptic state
+        resetHapticState()
+        
+        navigationState = .navigating(mode: mode)
+    }
+    
+    /// Set navigation mode during active navigation
+    func setNavigationMode(_ mode: NavigationMode) {
+        guard case .navigating = navigationState else { return }
+        
+        if mode == .haptic {
+            initializeHapticEngineIfNeeded()
+            hapticService.startNavigationBackgroundTask()
+        } else {
+            // Stop any ongoing haptic feedback when switching to visual
+            hapticService.stopAllHaptics()
+            hapticService.stopNavigationBackgroundTask()
+        }
+        
+        navigationState = .navigating(mode: mode)
     }
     
     /// Update navigation progress based on current location
@@ -117,7 +235,7 @@ class NavigationEngine: NavigationEngineProtocol {
         currentLocation = location
         
         guard let route = currentRoute,
-              case .navigating = navigationState else {
+              case .navigating(let mode) = navigationState else {
             return
         }
         
@@ -125,7 +243,12 @@ class NavigationEngine: NavigationEngineProtocol {
         updateRouteProgress(location: location, route: route)
         
         // Check if we need to advance to next step
-        updateCurrentStep(for: location)
+        let stepAdvanced = updateCurrentStep(for: location)
+        
+        // Trigger haptic feedback if in haptic mode
+        if mode == .haptic {
+            handleHapticFeedback(location: location, stepAdvanced: stepAdvanced)
+        }
         
         // Check if we've arrived at destination
         checkForArrival(location: location)
@@ -133,11 +256,19 @@ class NavigationEngine: NavigationEngineProtocol {
     
     /// Stop navigation and reset state
     func stopNavigation() {
+        // Stop any ongoing haptic feedback and background tasks
+        hapticService.stopAllHaptics()
+        hapticService.stopNavigationBackgroundTask()
+        
+        // Reset navigation state
         currentRoute = nil
         currentStep = nil
         currentStepIndex = 0
         routeProgress = 0
         navigationState = .idle
+        
+        // Reset haptic state
+        resetHapticState()
     }
     
     /// Select a specific route from available routes
@@ -176,10 +307,10 @@ class NavigationEngine: NavigationEngineProtocol {
     // MARK: - Private Methods
     
     /// Update current navigation step based on location
-    private func updateCurrentStep(for location: CLLocation) {
+    private func updateCurrentStep(for location: CLLocation) -> Bool {
         guard let route = currentRoute,
               currentStepIndex < route.steps.count else {
-            return
+            return false
         }
         
         let currentStepLocation = CLLocation(
@@ -192,7 +323,10 @@ class NavigationEngine: NavigationEngineProtocol {
         // If we're close to completing current step, advance to next
         if distanceToCurrentStep < stepProximityThreshold {
             advanceToNextStep()
+            return true
         }
+        
+        return false
     }
     
     /// Advance to the next navigation step
@@ -241,8 +375,107 @@ class NavigationEngine: NavigationEngineProtocol {
         
         // Consider arrived if within 20 meters of destination
         if distanceToDestination < 20 {
+            // Trigger arrival haptic feedback if in haptic mode
+            if case .navigating(let mode) = navigationState, mode == .haptic {
+                triggerArrivalHaptic()
+            }
+            
             navigationState = .arrived
             currentStep = nil
+        }
+    }
+    
+    // MARK: - Haptic Feedback Methods
+    
+    /// Initialize haptic engine if needed and device is capable
+    private func initializeHapticEngineIfNeeded() {
+        guard hapticService.isHapticCapable else { return }
+        
+        do {
+            try hapticService.initializeHapticEngine()
+        } catch {
+            print("Failed to initialize haptic engine: \(error)")
+            // Graceful fallback - continue navigation without haptics
+        }
+    }
+    
+    /// Reset haptic feedback state
+    private func resetHapticState() {
+        lastHapticTriggerDistance = 0
+        lastHapticTime = Date.distantPast
+        hasTriggeredTurnHaptic = false
+    }
+    
+    /// Handle haptic feedback based on navigation progress
+    private func handleHapticFeedback(location: CLLocation, stepAdvanced: Bool) {
+        guard let currentStep = currentStep else { return }
+        
+        // Calculate distance to current step
+        let stepLocation = CLLocation(
+            latitude: currentStep.polyline.coordinate.latitude,
+            longitude: currentStep.polyline.coordinate.longitude
+        )
+        let distanceToStep = location.distance(from: stepLocation)
+        
+        // If we advanced to a new step, reset haptic state for this step
+        if stepAdvanced {
+            hasTriggeredTurnHaptic = false
+        }
+        
+        // Check if we should trigger distance-based haptic cue
+        if shouldTriggerDistanceBasedHaptic(distanceToStep: distanceToStep) {
+            triggerNavigationHaptic(for: currentStep)
+        }
+    }
+    
+    /// Determine if haptic feedback should be triggered based on distance and timing
+    private func shouldTriggerDistanceBasedHaptic(distanceToStep: CLLocationDistance) -> Bool {
+        let now = Date()
+        
+        // Don't trigger if we've already triggered haptic for this step
+        guard !hasTriggeredTurnHaptic else { return false }
+        
+        // Don't trigger if we're too far from the step
+        guard distanceToStep <= hapticTriggerDistance else { return false }
+        
+        // Don't trigger if not enough time has passed since last haptic
+        guard now.timeIntervalSince(lastHapticTime) >= hapticMinimumInterval else { return false }
+        
+        return true
+    }
+    
+    /// Trigger appropriate haptic feedback based on step instruction
+    private func triggerNavigationHaptic(for step: MKRoute.Step) {
+        let instruction = step.instructions.lowercased()
+        lastHapticTime = Date()
+        hasTriggeredTurnHaptic = true
+        
+        Task {
+            do {
+                if instruction.contains("left") {
+                    try await hapticService.playTurnLeftPattern()
+                } else if instruction.contains("right") {
+                    try await hapticService.playTurnRightPattern()
+                } else if instruction.contains("straight") || instruction.contains("continue") {
+                    try await hapticService.playContinueStraightPattern()
+                } else {
+                    // Default to continue straight for unknown instructions
+                    try await hapticService.playContinueStraightPattern()
+                }
+            } catch {
+                print("Failed to play haptic pattern: \(error)")
+            }
+        }
+    }
+    
+    /// Trigger arrival haptic feedback
+    private func triggerArrivalHaptic() {
+        Task {
+            do {
+                try await hapticService.playArrivalPattern()
+            } catch {
+                print("Failed to play arrival haptic pattern: \(error)")
+            }
         }
     }
 }
@@ -255,6 +488,10 @@ enum NavigationError: LocalizedError {
     case routeCalculationFailed(Error)
     case routeCalculationTimeout
     case invalidDestination
+    case networkError(Error)
+    case serviceUnavailable
+    case rateLimitExceeded
+    case calculationCanceled
     
     var errorDescription: String? {
         switch self {
@@ -268,6 +505,36 @@ enum NavigationError: LocalizedError {
             return "Route calculation timed out. Please try again."
         case .invalidDestination:
             return "Invalid destination provided"
+        case .networkError(let error):
+            return "Network error during route calculation: \(error.localizedDescription)"
+        case .serviceUnavailable:
+            return "Route calculation service is temporarily unavailable"
+        case .rateLimitExceeded:
+            return "Too many route requests. Please wait a moment and try again."
+        case .calculationCanceled:
+            return "Route calculation was canceled"
+        }
+    }
+    
+    var isRetryable: Bool {
+        switch self {
+        case .networkError, .routeCalculationTimeout, .serviceUnavailable:
+            return true
+        case .noCurrentLocation, .noRouteFound, .invalidDestination, .rateLimitExceeded, .calculationCanceled, .routeCalculationFailed:
+            return false
+        }
+    }
+    
+    var retryDelay: TimeInterval {
+        switch self {
+        case .networkError:
+            return 2.0
+        case .routeCalculationTimeout:
+            return 1.0
+        case .serviceUnavailable:
+            return 5.0
+        default:
+            return 0.0
         }
     }
 }

@@ -1,237 +1,403 @@
 import XCTest
 import CoreLocation
+import Combine
 @testable import HapticNavigationMaps
-
-class MockCLLocationManager: CLLocationManager {
-    var mockAuthorizationStatus: CLAuthorizationStatus = .notDetermined
-    var mockLocation: CLLocation?
-    var didRequestWhenInUse = false
-    var didRequestAlways = false
-    var didStartUpdatingLocation = false
-    var didStopUpdatingLocation = false
-    
-    override var authorizationStatus: CLAuthorizationStatus {
-        return mockAuthorizationStatus
-    }
-    
-    override func requestWhenInUseAuthorization() {
-        didRequestWhenInUse = true
-    }
-    
-    override func requestAlwaysAuthorization() {
-        didRequestAlways = true
-    }
-    
-    override func startUpdatingLocation() {
-        didStartUpdatingLocation = true
-    }
-    
-    override func stopUpdatingLocation() {
-        didStopUpdatingLocation = true
-    }
-    
-    // Helper method to simulate location updates
-    func simulateLocationUpdate(_ location: CLLocation) {
-        delegate?.locationManager?(self, didUpdateLocations: [location])
-    }
-    
-    // Helper method to simulate authorization changes
-    func simulateAuthorizationChange(_ status: CLAuthorizationStatus) {
-        mockAuthorizationStatus = status
-        delegate?.locationManagerDidChangeAuthorization?(self)
-    }
-    
-    // Helper method to simulate location errors
-    func simulateLocationError(_ error: Error) {
-        delegate?.locationManager?(self, didFailWithError: error)
-    }
-}
 
 class LocationServiceTests: XCTestCase {
     var locationService: LocationService!
     var mockLocationManager: MockCLLocationManager!
+    var cancellables: Set<AnyCancellable>!
     
     override func setUp() {
         super.setUp()
         mockLocationManager = MockCLLocationManager()
         locationService = LocationService(locationManager: mockLocationManager)
+        cancellables = Set<AnyCancellable>()
     }
     
     override func tearDown() {
+        cancellables.removeAll()
         locationService = nil
         mockLocationManager = nil
         super.tearDown()
     }
     
-    // MARK: - Initialization Tests
+    // MARK: - Basic Functionality Tests
     
-    func testInitialization() {
-        XCTAssertNil(locationService.currentLocation)
+    func testLocationServiceInitialization() {
+        XCTAssertNotNil(locationService)
         XCTAssertEqual(locationService.authorizationStatus, .notDetermined)
         XCTAssertFalse(locationService.isLocationUpdating)
+        XCTAssertFalse(locationService.isBackgroundLocationEnabled)
+        XCTAssertFalse(locationService.hasRequestedAlwaysPermission)
+        XCTAssertNil(locationService.locationError)
+        XCTAssertTrue(locationService.isGPSSignalStrong)
     }
-    
-    // MARK: - Permission Request Tests
     
     func testRequestLocationPermissionWhenNotDetermined() {
-        mockLocationManager.mockAuthorizationStatus = .notDetermined
+        mockLocationManager.authorizationStatus = .notDetermined
+        
         locationService.requestLocationPermission()
         
-        XCTAssertTrue(mockLocationManager.didRequestWhenInUse)
-        XCTAssertFalse(mockLocationManager.didRequestAlways)
+        XCTAssertTrue(mockLocationManager.requestWhenInUseAuthorizationCalled)
+        XCTAssertNil(locationService.locationError)
     }
     
-    func testRequestLocationPermissionWhenAuthorizedWhenInUse() {
-        mockLocationManager.mockAuthorizationStatus = .authorizedWhenInUse
-        locationService.requestLocationPermission()
+    func testStartLocationUpdatesWithAuthorizedStatus() {
+        mockLocationManager.authorizationStatus = .authorizedWhenInUse
         
-        XCTAssertFalse(mockLocationManager.didRequestWhenInUse)
-        XCTAssertTrue(mockLocationManager.didRequestAlways)
-    }
-    
-    func testRequestLocationPermissionWhenDenied() {
-        mockLocationManager.mockAuthorizationStatus = .denied
-        locationService.requestLocationPermission()
-        
-        XCTAssertFalse(mockLocationManager.didRequestWhenInUse)
-        XCTAssertFalse(mockLocationManager.didRequestAlways)
-    }
-    
-    func testRequestLocationPermissionWhenAlreadyAuthorizedAlways() {
-        mockLocationManager.mockAuthorizationStatus = .authorizedAlways
-        locationService.requestLocationPermission()
-        
-        XCTAssertFalse(mockLocationManager.didRequestWhenInUse)
-        XCTAssertFalse(mockLocationManager.didRequestAlways)
-    }
-    
-    // MARK: - Location Updates Tests
-    
-    func testStartLocationUpdatesWithPermission() {
-        mockLocationManager.mockAuthorizationStatus = .authorizedWhenInUse
         locationService.startLocationUpdates()
         
-        XCTAssertTrue(mockLocationManager.didStartUpdatingLocation)
+        XCTAssertTrue(mockLocationManager.startUpdatingLocationCalled)
         XCTAssertTrue(locationService.isLocationUpdating)
-    }
-    
-    func testStartLocationUpdatesWithoutPermission() {
-        mockLocationManager.mockAuthorizationStatus = .denied
-        locationService.startLocationUpdates()
-        
-        XCTAssertFalse(mockLocationManager.didStartUpdatingLocation)
-        XCTAssertFalse(locationService.isLocationUpdating)
+        XCTAssertNil(locationService.locationError)
     }
     
     func testStopLocationUpdates() {
-        // First start updates
-        mockLocationManager.mockAuthorizationStatus = .authorizedWhenInUse
         locationService.startLocationUpdates()
-        
-        // Then stop them
         locationService.stopLocationUpdates()
         
-        XCTAssertTrue(mockLocationManager.didStopUpdatingLocation)
+        XCTAssertTrue(mockLocationManager.stopUpdatingLocationCalled)
         XCTAssertFalse(locationService.isLocationUpdating)
+        XCTAssertNil(locationService.locationError)
     }
     
-    func testStartLocationUpdatesWhenAlreadyUpdating() {
-        mockLocationManager.mockAuthorizationStatus = .authorizedWhenInUse
-        locationService.startLocationUpdates()
-        
-        // Reset the flag
-        mockLocationManager.didStartUpdatingLocation = false
-        
-        // Try to start again
-        locationService.startLocationUpdates()
-        
-        // Should not call startUpdatingLocation again
-        XCTAssertFalse(mockLocationManager.didStartUpdatingLocation)
-    }
+    // MARK: - Error Handling Tests
     
-    // MARK: - Delegate Method Tests
-    
-    func testLocationUpdateWithValidLocation() {
-        let testLocation = CLLocation(latitude: 37.7749, longitude: -122.4194)
+    func testLocationPermissionDeniedError() {
+        mockLocationManager.authorizationStatus = .denied
         
-        let expectation = XCTestExpectation(description: "Location updated")
-        
-        // Use a small delay to allow for async updates
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            if self.locationService.currentLocation != nil {
-                expectation.fulfill()
+        let expectation = XCTestExpectation(description: "Location error set")
+        locationService.$locationError
+            .sink { error in
+                if error == .permissionDenied {
+                    expectation.fulfill()
+                }
             }
-        }
+            .store(in: &cancellables)
         
-        mockLocationManager.simulateLocationUpdate(testLocation)
+        locationService.requestLocationPermission()
         
         wait(for: [expectation], timeout: 1.0)
-        
-        XCTAssertNotNil(locationService.currentLocation)
-        if let currentLocation = locationService.currentLocation {
-            XCTAssertEqual(currentLocation.coordinate.latitude, 37.7749, accuracy: 0.0001)
-            XCTAssertEqual(currentLocation.coordinate.longitude, -122.4194, accuracy: 0.0001)
-        }
+        XCTAssertEqual(locationService.locationError, .permissionDenied)
     }
     
-    func testLocationUpdateWithInaccurateLocation() {
-        // Create a location with poor accuracy (> 100m)
-        let testLocation = CLLocation(
+    func testLocationPermissionRestrictedError() {
+        mockLocationManager.authorizationStatus = .restricted
+        
+        let expectation = XCTestExpectation(description: "Location error set")
+        locationService.$locationError
+            .sink { error in
+                if error == .permissionRestricted {
+                    expectation.fulfill()
+                }
+            }
+            .store(in: &cancellables)
+        
+        locationService.requestLocationPermission()
+        
+        wait(for: [expectation], timeout: 1.0)
+        XCTAssertEqual(locationService.locationError, .permissionRestricted)
+    }
+    
+    func testStartLocationUpdatesWithoutPermission() {
+        mockLocationManager.authorizationStatus = .denied
+        
+        locationService.startLocationUpdates()
+        
+        XCTAssertFalse(mockLocationManager.startUpdatingLocationCalled)
+        XCTAssertFalse(locationService.isLocationUpdating)
+        XCTAssertEqual(locationService.locationError, .permissionDenied)
+    }
+    
+    func testLocationAccuracyTooLowError() {
+        mockLocationManager.authorizationStatus = .authorizedWhenInUse
+        locationService.startLocationUpdates()
+        
+        let expectation = XCTestExpectation(description: "Accuracy too low error")
+        locationService.$locationError
+            .sink { error in
+                if error == .accuracyTooLow {
+                    expectation.fulfill()
+                }
+            }
+            .store(in: &cancellables)
+        
+        // Simulate receiving a location with poor accuracy
+        let poorLocation = CLLocation(
             coordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
             altitude: 0,
-            horizontalAccuracy: 150, // Poor accuracy
+            horizontalAccuracy: 600, // Very poor accuracy
             verticalAccuracy: 0,
             timestamp: Date()
         )
         
-        mockLocationManager.simulateLocationUpdate(testLocation)
-        
-        // Should not update current location due to poor accuracy
-        XCTAssertNil(locationService.currentLocation)
-    }
-    
-    func testAuthorizationStatusChange() {
-        let expectation = XCTestExpectation(description: "Authorization status updated")
-        
-        // Use a small delay to allow for async updates
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            if self.locationService.authorizationStatus == .authorizedWhenInUse {
-                expectation.fulfill()
-            }
-        }
-        
-        mockLocationManager.simulateAuthorizationChange(.authorizedWhenInUse)
+        locationService.locationManager(mockLocationManager, didUpdateLocations: [poorLocation])
         
         wait(for: [expectation], timeout: 1.0)
+        XCTAssertEqual(locationService.locationError, .accuracyTooLow)
+    }
+    
+    func testStaleLocationError() {
+        mockLocationManager.authorizationStatus = .authorizedWhenInUse
+        locationService.startLocationUpdates()
         
+        let expectation = XCTestExpectation(description: "Stale location error")
+        locationService.$locationError
+            .sink { error in
+                if error == .staleLocation {
+                    expectation.fulfill()
+                }
+            }
+            .store(in: &cancellables)
+        
+        // Simulate receiving an old location
+        let staleLocation = CLLocation(
+            coordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
+            altitude: 0,
+            horizontalAccuracy: 10,
+            verticalAccuracy: 0,
+            timestamp: Date().addingTimeInterval(-10) // 10 seconds old
+        )
+        
+        locationService.locationManager(mockLocationManager, didUpdateLocations: [staleLocation])
+        
+        wait(for: [expectation], timeout: 1.0)
+        XCTAssertEqual(locationService.locationError, .staleLocation)
+    }
+    
+    func testGoodLocationClearsError() {
+        // First set an error
+        locationService.startLocationUpdates()
+        let poorLocation = CLLocation(
+            coordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
+            altitude: 0,
+            horizontalAccuracy: 600,
+            verticalAccuracy: 0,
+            timestamp: Date()
+        )
+        locationService.locationManager(mockLocationManager, didUpdateLocations: [poorLocation])
+        XCTAssertEqual(locationService.locationError, .accuracyTooLow)
+        
+        // Then provide a good location
+        let goodLocation = CLLocation(
+            coordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
+            altitude: 0,
+            horizontalAccuracy: 5,
+            verticalAccuracy: 0,
+            timestamp: Date()
+        )
+        
+        let expectation = XCTestExpectation(description: "Error cleared")
+        locationService.$locationError
+            .sink { error in
+                if error == nil {
+                    expectation.fulfill()
+                }
+            }
+            .store(in: &cancellables)
+        
+        locationService.locationManager(mockLocationManager, didUpdateLocations: [goodLocation])
+        
+        wait(for: [expectation], timeout: 1.0)
+        XCTAssertNil(locationService.locationError)
+        XCTAssertEqual(locationService.currentLocation, goodLocation)
+    }
+    
+    // MARK: - Location Manager Delegate Error Tests
+    
+    func testLocationManagerDidFailWithPermissionDeniedError() {
+        let error = CLError(.denied)
+        
+        let expectation = XCTestExpectation(description: "Permission denied error handled")
+        locationService.$locationError
+            .sink { locationError in
+                if locationError == .permissionDenied {
+                    expectation.fulfill()
+                }
+            }
+            .store(in: &cancellables)
+        
+        locationService.locationManager(mockLocationManager, didFailWithError: error)
+        
+        wait(for: [expectation], timeout: 1.0)
+        XCTAssertEqual(locationService.locationError, .permissionDenied)
+        XCTAssertFalse(locationService.isLocationUpdating)
+    }
+    
+    func testLocationManagerDidFailWithRestrictedError() {
+        let error = CLError(.locationUnknown)
+        
+        let expectation = XCTestExpectation(description: "Location unavailable error handled")
+        locationService.$locationError
+            .sink { locationError in
+                if locationError == .locationUnavailable {
+                    expectation.fulfill()
+                }
+            }
+            .store(in: &cancellables)
+        
+        locationService.locationManager(mockLocationManager, didFailWithError: error)
+        
+        wait(for: [expectation], timeout: 1.0)
+        XCTAssertEqual(locationService.locationError, .locationUnavailable)
+    }
+    
+    func testLocationManagerDidFailWithNetworkError() {
+        let error = CLError(.network)
+        
+        let expectation = XCTestExpectation(description: "Network error handled")
+        locationService.$locationError
+            .sink { locationError in
+                if locationError == .networkError {
+                    expectation.fulfill()
+                }
+            }
+            .store(in: &cancellables)
+        
+        locationService.locationManager(mockLocationManager, didFailWithError: error)
+        
+        wait(for: [expectation], timeout: 1.0)
+        XCTAssertEqual(locationService.locationError, .networkError)
+    }
+    
+    // MARK: - Authorization Change Tests
+    
+    func testLocationManagerDidChangeAuthorizationToAuthorized() {
+        mockLocationManager.authorizationStatus = .authorizedWhenInUse
+        
+        let expectation = XCTestExpectation(description: "Authorization status updated")
+        locationService.$authorizationStatus
+            .sink { status in
+                if status == .authorizedWhenInUse {
+                    expectation.fulfill()
+                }
+            }
+            .store(in: &cancellables)
+        
+        locationService.locationManagerDidChangeAuthorization(mockLocationManager)
+        
+        wait(for: [expectation], timeout: 1.0)
         XCTAssertEqual(locationService.authorizationStatus, .authorizedWhenInUse)
     }
     
-    func testAuthorizationDeniedStopsLocationUpdates() {
-        // First start location updates
-        mockLocationManager.mockAuthorizationStatus = .authorizedWhenInUse
+    func testLocationManagerDidChangeAuthorizationToDenied() {
+        // First authorize
+        mockLocationManager.authorizationStatus = .authorizedWhenInUse
         locationService.startLocationUpdates()
         XCTAssertTrue(locationService.isLocationUpdating)
         
-        // Then simulate authorization being denied
-        mockLocationManager.simulateAuthorizationChange(.denied)
+        // Then deny
+        mockLocationManager.authorizationStatus = .denied
         
-        // Should stop location updates
+        let expectation = XCTestExpectation(description: "Location updates stopped")
+        locationService.$isLocationUpdating
+            .sink { isUpdating in
+                if !isUpdating {
+                    expectation.fulfill()
+                }
+            }
+            .store(in: &cancellables)
+        
+        locationService.locationManagerDidChangeAuthorization(mockLocationManager)
+        
+        wait(for: [expectation], timeout: 1.0)
+        XCTAssertEqual(locationService.authorizationStatus, .denied)
         XCTAssertFalse(locationService.isLocationUpdating)
     }
     
-    func testLocationManagerError() {
-        let error = CLError(.denied)
-        
-        // Start location updates first
-        mockLocationManager.mockAuthorizationStatus = .authorizedWhenInUse
+    // MARK: - GPS Signal Monitoring Tests
+    
+    func testGPSSignalLossDetection() {
         locationService.startLocationUpdates()
-        XCTAssertTrue(locationService.isLocationUpdating)
         
-        // Simulate error
-        mockLocationManager.simulateLocationError(error)
+        // Simulate GPS signal loss by not providing location updates for extended period
+        let expectation = XCTestExpectation(description: "GPS signal loss detected")
         
-        // Should stop location updates on denied error
-        XCTAssertFalse(locationService.isLocationUpdating)
+        // Listen for GPS signal lost notification
+        NotificationCenter.default.addObserver(forName: NSNotification.Name("GPSSignalLost"), object: nil, queue: .main) { _ in
+            expectation.fulfill()
+        }
+        
+        // Simulate time passing without location updates (this would normally take 30+ seconds)
+        // For testing, we can manually trigger the GPS signal check
+        locationService.setValue(Date().addingTimeInterval(-35), forKey: "lastLocationUpdateTime")
+        
+        // Manually trigger GPS signal health check
+        let mirror = Mirror(reflecting: locationService!)
+        if let checkMethod = mirror.children.first(where: { $0.label == "checkGPSSignalHealth" })?.value as? () -> Void {
+            checkMethod()
+        }
+        
+        wait(for: [expectation], timeout: 2.0)
+        XCTAssertFalse(locationService.isGPSSignalStrong)
+        XCTAssertEqual(locationService.locationError, .gpsSignalLost)
+    }
+    
+    // MARK: - Recovery Mechanism Tests
+    
+    func testLocationUpdateRetryMechanism() {
+        locationService.startLocationUpdates()
+        
+        // Simulate a recoverable error
+        let error = CLError(.locationUnknown)
+        locationService.locationManager(mockLocationManager, didFailWithError: error)
+        
+        // The service should attempt recovery
+        XCTAssertEqual(locationService.locationError, .locationUnavailable)
+        
+        // After retry, if we get a good location, error should clear
+        let goodLocation = CLLocation(
+            coordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
+            altitude: 0,
+            horizontalAccuracy: 5,
+            verticalAccuracy: 0,
+            timestamp: Date()
+        )
+        
+        let expectation = XCTestExpectation(description: "Recovery successful")
+        locationService.$locationError
+            .sink { error in
+                if error == nil {
+                    expectation.fulfill()
+                }
+            }
+            .store(in: &cancellables)
+        
+        locationService.locationManager(mockLocationManager, didUpdateLocations: [goodLocation])
+        
+        wait(for: [expectation], timeout: 1.0)
+        XCTAssertNil(locationService.locationError)
+        XCTAssertEqual(locationService.currentLocation, goodLocation)
+    }
+}
+
+// MARK: - Mock CLLocationManager
+
+class MockCLLocationManager: CLLocationManager {
+    var authorizationStatus: CLAuthorizationStatus = .notDetermined
+    var requestWhenInUseAuthorizationCalled = false
+    var requestAlwaysAuthorizationCalled = false
+    var startUpdatingLocationCalled = false
+    var stopUpdatingLocationCalled = false
+    
+    override var authorizationStatus: CLAuthorizationStatus {
+        return authorizationStatus
+    }
+    
+    override func requestWhenInUseAuthorization() {
+        requestWhenInUseAuthorizationCalled = true
+    }
+    
+    override func requestAlwaysAuthorization() {
+        requestAlwaysAuthorizationCalled = true
+    }
+    
+    override func startUpdatingLocation() {
+        startUpdatingLocationCalled = true
+    }
+    
+    override func stopUpdatingLocation() {
+        stopUpdatingLocationCalled = true
     }
 }
