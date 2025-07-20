@@ -144,9 +144,7 @@ class AppCoordinator: ObservableObject {
         // Restore previous navigation state from UserPreferences
         let preferences = dependencyContainer.userPreferences
         
-        if let _ = preferences?.lastNavigationRoute,
-           let _ = preferences?.lastNavigationMode {
-            
+        if preferences?.lastNavigationRoute != nil && preferences?.lastNavigationMode != nil {
             // Try to restore navigation if there was an active session
             print("Found previous navigation state, ready to restore if needed")
             // Note: Actual restoration would happen when user chooses to continue
@@ -189,9 +187,8 @@ class AppCoordinator: ObservableObject {
     
     // MARK: - Navigation State Management
     
-    /// Check if the app should show onboarding
-    var shouldShowOnboarding: Bool {
-        // Show onboarding if location permission not granted
+    /// Check if the app needs location permission (used by UI for permission prompts)
+    var needsLocationPermission: Bool {
         guard let locationService = dependencyContainer.locationService else {
             return true
         }

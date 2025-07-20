@@ -21,8 +21,7 @@ class HapticNavigationService: HapticNavigationServiceProtocol {
     
     private var hapticEngine: CHHapticEngine?
     private var currentPlayer: CHHapticPatternPlayer?
-    private var backgroundTaskIdentifier: UIBackgroundTaskIdentifier = .invalid
-    private var navigationBackgroundTask: UIBackgroundTaskIdentifier = .invalid
+    private let backgroundTaskManager = BackgroundTaskManager.shared
     private var isNavigationActive: Bool = false
     private var appStateObserver: NSObjectProtocol?
     
@@ -31,6 +30,18 @@ class HapticNavigationService: HapticNavigationServiceProtocol {
     private let maxConsecutiveFailures: Int = 3
     private var lastFailureTime: Date?
     private let failureCooldownPeriod: TimeInterval = 10.0
+    
+    // Haptic pattern caching for performance optimization
+    private var cachedPatterns: [NavigationPatternType: CHHapticPattern] = [:]
+    private var cachedPlayers: [NavigationPatternType: CHHapticPatternPlayer] = [:]
+    private var patternCacheInitialized: Bool = false
+    private let maxCacheSize: Int = 10
+    
+    // Performance monitoring
+    private var patternCreationCount: Int = 0
+    private var patternCacheHits: Int = 0
+    private var lastPerformanceReset: Date = Date()
+    @Published var patternCacheHitRate: Double = 0.0
     
     // Audio fallback support
     nonisolated(unsafe) private var audioEngine: AVAudioEngine?
@@ -46,6 +57,10 @@ class HapticNavigationService: HapticNavigationServiceProtocol {
         self.isHapticModeEnabled = isHapticCapable
         setupBackgroundSupport()
         setupAudioFallback()
+        
+        // Set up accessibility service as fallback delegate
+        // Note: AccessibilityService will be connected when available
+        self.fallbackDelegate = nil
     }
     
     deinit {
@@ -53,15 +68,15 @@ class HapticNavigationService: HapticNavigationServiceProtocol {
             NotificationCenter.default.removeObserver(observer)
         }
         
-        // End background tasks without async calls in deinit
-        if navigationBackgroundTask != .invalid {
-            UIApplication.shared.endBackgroundTask(navigationBackgroundTask)
-            navigationBackgroundTask = .invalid
+        // Clear pattern cache to free memory
+        Task { @MainActor in
+            clearPatternCache()
         }
         
-        if backgroundTaskIdentifier != .invalid {
-            UIApplication.shared.endBackgroundTask(backgroundTaskIdentifier)
-            backgroundTaskIdentifier = .invalid
+        // End background tasks
+        Task { @MainActor in
+            backgroundTaskManager.endTask(.hapticPlayback)
+            backgroundTaskManager.endTask(.navigation)
         }
         
         cleanupAudioEngine()
@@ -84,6 +99,10 @@ class HapticNavigationService: HapticNavigationServiceProtocol {
             hapticEngine = try CHHapticEngine()
             setupEngineHandlers()
             try hapticEngine?.start()
+            
+            // Preload haptic patterns for better performance
+            try preloadHapticPatterns()
+            
             engineState = .running
             
             // Reset failure count on successful initialization
@@ -142,6 +161,9 @@ class HapticNavigationService: HapticNavigationServiceProtocol {
     
     func resetEngine() throws {
         stopAllHaptics()
+        Task { @MainActor in
+            clearPatternCache()
+        }
         hapticEngine?.stop()
         hapticEngine = nil
         engineState = .notInitialized
@@ -198,6 +220,109 @@ class HapticNavigationService: HapticNavigationServiceProtocol {
         )
     }
     
+    // MARK: - Haptic Pattern Caching
+    
+    /// Preload all navigation patterns into cache for better performance
+    private func preloadHapticPatterns() throws {
+        guard let engine = hapticEngine else {
+            throw HapticNavigationError.engineNotInitialized
+        }
+        
+        let patterns: [NavigationPatternType: HapticPattern] = [
+            .leftTurn: .leftTurn,
+            .rightTurn: .rightTurn,
+            .continueStraight: .continueStraight,
+            .arrival: .arrival
+        ]
+        
+        for (patternType, hapticPattern) in patterns {
+            do {
+                let chPattern = try CHHapticPattern(events: hapticPattern.events, parameters: [])
+                let player = try engine.makePlayer(with: chPattern)
+                
+                cachedPatterns[patternType] = chPattern
+                cachedPlayers[patternType] = player
+                
+                print("Preloaded pattern: \(patternType.rawValue)")
+            } catch {
+                print("Failed to preload pattern \(patternType.rawValue): \(error)")
+                // Continue with other patterns even if one fails
+            }
+        }
+        
+        patternCacheInitialized = true
+        print("Haptic pattern cache initialized with \(cachedPatterns.count) patterns")
+    }
+    
+    /// Get cached pattern player or create new one if not cached
+    private func getCachedPlayer(for patternType: NavigationPatternType) throws -> CHHapticPatternPlayer {
+        if let cachedPlayer = cachedPlayers[patternType] {
+            patternCacheHits += 1
+            return cachedPlayer
+        }
+        
+        // Pattern not cached, create it
+        patternCreationCount += 1
+        return try createPatternPlayer(for: patternType)
+    }
+    
+    /// Create a new pattern player for the given pattern type
+    private func createPatternPlayer(for patternType: NavigationPatternType) throws -> CHHapticPatternPlayer {
+        guard let engine = hapticEngine else {
+            throw HapticNavigationError.engineNotInitialized
+        }
+        
+        let hapticPattern = getHapticPattern(for: patternType)
+        let chPattern = try CHHapticPattern(events: hapticPattern.events, parameters: [])
+        let player = try engine.makePlayer(with: chPattern)
+        
+        // Add to cache if there's space
+        if cachedPlayers.count < maxCacheSize {
+            cachedPatterns[patternType] = chPattern
+            cachedPlayers[patternType] = player
+        }
+        
+        return player
+    }
+    
+    /// Get HapticPattern for a given pattern type
+    private func getHapticPattern(for patternType: NavigationPatternType) -> HapticPattern {
+        switch patternType {
+        case .leftTurn:
+            return .leftTurn
+        case .rightTurn:
+            return .rightTurn
+        case .continueStraight:
+            return .continueStraight
+        case .arrival:
+            return .arrival
+        }
+    }
+    
+    /// Clear pattern cache and release memory
+    private func clearPatternCache() {
+        cachedPatterns.removeAll()
+        cachedPlayers.removeAll()
+        patternCacheInitialized = false
+        print("Haptic pattern cache cleared")
+    }
+    
+    /// Update performance metrics for pattern caching
+    private func updateCachePerformanceMetrics() {
+        let totalOperations = patternCreationCount + patternCacheHits
+        if totalOperations > 0 {
+            patternCacheHitRate = Double(patternCacheHits) / Double(totalOperations)
+        }
+        
+        // Reset counters periodically
+        if Date().timeIntervalSince(lastPerformanceReset) > 300.0 { // 5 minutes
+            patternCreationCount = 0
+            patternCacheHits = 0
+            lastPerformanceReset = Date()
+            print("Cache hit rate: \(String(format: "%.2f", patternCacheHitRate * 100))%")
+        }
+    }
+    
     // MARK: - Private Methods
     
     private func setupEngineHandlers() {
@@ -223,7 +348,7 @@ class HapticNavigationService: HapticNavigationServiceProtocol {
     private func playPattern(_ pattern: HapticPattern) async throws {
         guard isHapticModeEnabled else { return }
         
-        guard let engine = hapticEngine else {
+        guard hapticEngine != nil else {
             throw HapticNavigationError.engineNotInitialized
         }
         
@@ -238,11 +363,11 @@ class HapticNavigationService: HapticNavigationServiceProtocol {
             // Stop any currently playing pattern
             stopAllHaptics()
             
-            // Create haptic pattern
-            let hapticPattern = try CHHapticPattern(events: pattern.events, parameters: [])
+            // Get cached player or create new one
+            currentPlayer = try getCachedPlayer(for: pattern.patternType)
             
-            // Create player
-            currentPlayer = try engine.makePlayer(with: hapticPattern)
+            // Update performance metrics
+            updateCachePerformanceMetrics()
             
             // Play pattern
             try currentPlayer?.start(atTime: CHHapticTimeImmediate)
@@ -259,21 +384,20 @@ class HapticNavigationService: HapticNavigationServiceProtocol {
     
     /// Begin background task for haptic playback
     private func beginBackgroundTaskIfNeeded() {
-        guard backgroundTaskIdentifier == .invalid else { return }
-        
-        backgroundTaskIdentifier = UIApplication.shared.beginBackgroundTask(withName: "HapticPlayback") { [weak self] in
-            Task { @MainActor in
-                self?.endBackgroundTaskIfNeeded()
-            }
-        }
+        let _ = backgroundTaskManager.beginTask(.hapticPlayback)
     }
     
     /// End background task after haptic playback
     private func endBackgroundTaskIfNeeded() {
-        guard backgroundTaskIdentifier != .invalid else { return }
-        
-        UIApplication.shared.endBackgroundTask(backgroundTaskIdentifier)
-        backgroundTaskIdentifier = .invalid
+        Task { @MainActor in
+            backgroundTaskManager.endTask(.hapticPlayback)
+        }
+    }
+    
+    /// Handle haptic playback task expiration
+    private func handleHapticPlaybackExpiration() {
+        print("Haptic playback background task expired")
+        stopAllHaptics()
     }
     
     /// Schedule background task completion after pattern completes
@@ -307,70 +431,79 @@ class HapticNavigationService: HapticNavigationServiceProtocol {
         guard !isNavigationActive else { return }
         
         isNavigationActive = true
-        beginNavigationBackgroundTask()
+        let _ = backgroundTaskManager.beginTask(.navigation)
     }
     
     /// Stop continuous background task for navigation
     func stopNavigationBackgroundTask() {
         isNavigationActive = false
-        endNavigationBackgroundTask()
-    }
-    
-    private func beginNavigationBackgroundTask() {
-        guard navigationBackgroundTask == .invalid else { return }
-        
-        navigationBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "NavigationHaptics") { [weak self] in
-            // When background time expires, restart the task if navigation is still active
-            Task { @MainActor in
-                self?.handleBackgroundTaskExpiration()
-            }
+        Task { @MainActor in
+            backgroundTaskManager.endTask(.navigation)
         }
-    }
-    
-    private func endNavigationBackgroundTask() {
-        guard navigationBackgroundTask != .invalid else { return }
-        
-        UIApplication.shared.endBackgroundTask(navigationBackgroundTask)
-        navigationBackgroundTask = .invalid
     }
     
     private func handleAppDidEnterBackground() {
         // Start navigation background task if haptic navigation is active
         if isHapticModeEnabled && isNavigationActive {
-            beginNavigationBackgroundTask()
+            let _ = backgroundTaskManager.beginTask(.navigation)
         }
     }
     
-    private func handleBackgroundTaskExpiration() {
-        // End current task
-        endNavigationBackgroundTask()
+    private func handleNavigationTaskExpiration() {
+        print("Navigation background task expired")
         
-        // Restart background task if navigation is still active
+        // If navigation is still active, try to restart the task
         if isNavigationActive {
-            beginNavigationBackgroundTask()
+            // Small delay before restart to avoid rapid cycling
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+                if let self = self, self.isNavigationActive {
+                    let _ = self.backgroundTaskManager.beginTask(.navigation)
+                }
+            }
         }
     }
     
     // MARK: - Audio Fallback Support
     
     private func setupAudioFallback() {
-        // Initialize audio engine and player
-        audioEngine = AVAudioEngine()
-        audioPlayerNode = AVAudioPlayerNode()
-        
-        guard let engine = audioEngine, let player = audioPlayerNode else {
-            print("Audio fallback not available.")
-            isAudioFallbackEnabled = false
-            return
-        }
-        
-        engine.attach(player)
-        engine.connect(player, to: engine.mainMixerNode, format: nil)
-        
         do {
+            // Configure audio session first
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try audioSession.setActive(true)
+            
+            // Initialize audio engine and player
+            audioEngine = AVAudioEngine()
+            audioPlayerNode = AVAudioPlayerNode()
+            
+            guard let engine = audioEngine, let player = audioPlayerNode else {
+                print("Audio fallback not available.")
+                isAudioFallbackEnabled = false
+                return
+            }
+            
+            // Use explicit audio format to avoid converter issues
+            let outputFormat = engine.outputNode.outputFormat(forBus: 0)
+            let playerFormat = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: outputFormat.sampleRate,
+                channels: 1,
+                interleaved: false
+            )
+            
+            guard let format = playerFormat else {
+                print("Could not create audio format for fallback")
+                isAudioFallbackEnabled = false
+                return
+            }
+            
+            engine.attach(player)
+            engine.connect(player, to: engine.mainMixerNode, format: format)
+            
             try engine.start()
+            
         } catch {
-            print("Failed to start audio engine for fallback: \(error)")
+            print("Failed to setup audio fallback: \(error)")
             isAudioFallbackEnabled = false
         }
     }
@@ -399,25 +532,42 @@ class HapticNavigationService: HapticNavigationServiceProtocol {
             throw HapticNavigationError.playbackFailed(NSError(domain: "AudioFallback", code: -1, userInfo: [NSLocalizedDescriptionKey: "Audio engine not available"]))
         }
         
-        let sampleRate = Float(engine.outputNode.outputFormat(forBus: 0).sampleRate)
+        // Validate input parameters
+        guard frequency > 0, frequency < 20000, duration > 0, duration < 10 else {
+            throw HapticNavigationError.playbackFailed(NSError(domain: "AudioFallback", code: -3, userInfo: [NSLocalizedDescriptionKey: "Invalid audio parameters"]))
+        }
+        
+        // Use consistent format
+        let outputFormat = engine.outputNode.outputFormat(forBus: 0)
+        let sampleRate = Float(outputFormat.sampleRate)
         let frameCount = AVAudioFrameCount(sampleRate * Float(duration))
         
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: engine.outputNode.outputFormat(forBus: 0), frameCapacity: frameCount) else {
+        // Create buffer with mono format to avoid converter issues
+        let monoFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: outputFormat.sampleRate,
+            channels: 1,
+            interleaved: false
+        )
+        
+        guard let format = monoFormat,
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
             throw HapticNavigationError.playbackFailed(NSError(domain: "AudioFallback", code: -2, userInfo: [NSLocalizedDescriptionKey: "Failed to create audio buffer"]))
         }
         
         buffer.frameLength = frameCount
         
-        // Generate sine wave tone
+        // Generate sine wave tone with bounds checking
         let angleDelta = Float(2.0 * Double.pi * Double(frequency) / Double(sampleRate))
         var angle: Float = 0
         
+        guard let channelData = buffer.floatChannelData?[0] else {
+            throw HapticNavigationError.playbackFailed(NSError(domain: "AudioFallback", code: -4, userInfo: [NSLocalizedDescriptionKey: "Could not access audio buffer data"]))
+        }
+        
         for frame in 0..<Int(frameCount) {
             let value = sin(angle) * 0.3 // 30% volume
-            buffer.floatChannelData?.pointee[frame] = value
-            if buffer.format.channelCount == 2 {
-                buffer.floatChannelData?.advanced(by: 1).pointee[frame] = value
-            }
+            channelData[frame] = value
             angle += angleDelta
             if angle > Float(2.0 * Double.pi) {
                 angle -= Float(2.0 * Double.pi)

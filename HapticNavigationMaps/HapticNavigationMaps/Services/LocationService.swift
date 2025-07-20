@@ -99,7 +99,7 @@ class LocationService: NSObject, LocationServiceProtocol, ObservableObject {
     @Published var locationAccuracy: CLLocationAccuracy = 0
     
     private let locationManager: CLLocationManager
-    private var backgroundTaskIdentifier: UIBackgroundTaskIdentifier = .invalid
+    private let backgroundTaskManager = BackgroundTaskManager.shared
     private var permissionMonitoringTimer: Timer?
     private var gpsSignalMonitoringTimer: Timer?
     private var isInBackground: Bool = false
@@ -108,6 +108,64 @@ class LocationService: NSObject, LocationServiceProtocol, ObservableObject {
     private let maxRetryCount: Int = 3
     private let gpsSignalLossThreshold: TimeInterval = 30.0 // seconds
     private var lastLocationUpdateTime: Date = Date()
+    
+    // MARK: - Location Update Configuration
+    
+    /// Configuration for different navigation states
+    struct LocationUpdateConfiguration {
+        let desiredAccuracy: CLLocationAccuracy
+        let distanceFilter: CLLocationDistance
+        let updateInterval: TimeInterval
+        let batchSize: Int
+        
+        static let idle = LocationUpdateConfiguration(
+            desiredAccuracy: kCLLocationAccuracyHundredMeters,
+            distanceFilter: 100,
+            updateInterval: 30.0,
+            batchSize: 1
+        )
+        
+        static let calculating = LocationUpdateConfiguration(
+            desiredAccuracy: kCLLocationAccuracyBest,
+            distanceFilter: 10,
+            updateInterval: 5.0,
+            batchSize: 1
+        )
+        
+        static let navigatingVisual = LocationUpdateConfiguration(
+            desiredAccuracy: kCLLocationAccuracyBest,
+            distanceFilter: 5,
+            updateInterval: 2.0,
+            batchSize: 2
+        )
+        
+        static let navigatingHaptic = LocationUpdateConfiguration(
+            desiredAccuracy: kCLLocationAccuracyBest,
+            distanceFilter: 3,
+            updateInterval: 1.0,
+            batchSize: 3
+        )
+        
+        static let background = LocationUpdateConfiguration(
+            desiredAccuracy: kCLLocationAccuracyNearestTenMeters,
+            distanceFilter: 20,
+            updateInterval: 10.0,
+            batchSize: 1
+        )
+    }
+
+    // Adaptive location update properties
+    @Published var currentNavigationState: NavigationState = .idle
+    private var currentConfiguration: LocationUpdateConfiguration = .idle
+    private var updateFrequencyTimer: Timer?
+    private var locationUpdateQueue: [CLLocation] = []
+    private let maxQueueSize: Int = 10
+    
+    // Performance monitoring
+    private var locationUpdateCount: Int = 0
+    private var lastPerformanceReset: Date = Date()
+    private let performanceResetInterval: TimeInterval = 300.0 // 5 minutes
+    @Published var currentUpdateFrequency: Double = 0.0 // updates per second
     
     // Settings redirect support
     private var pendingLocationAlert: UIAlertController?
@@ -131,11 +189,15 @@ class LocationService: NSObject, LocationServiceProtocol, ObservableObject {
     
     private func setupLocationManager() {
         locationManager.delegate = self
-        locationManager.desiredAccuracy = kCLLocationAccuracyBest
-        locationManager.distanceFilter = 5.0 // Update every 5 meters
         authorizationStatus = locationManager.authorizationStatus
         updateBackgroundLocationStatus()
         configureBackgroundLocationUpdates()
+        
+        // Apply initial configuration
+        applyLocationConfiguration(.idle)
+        
+        // Start performance monitoring
+        startPerformanceMonitoring()
     }
     
     private func setupBackgroundSupport() {
@@ -159,11 +221,11 @@ class LocationService: NSObject, LocationServiceProtocol, ObservableObject {
     }
     
     deinit {
-        NotificationCenter.default.removeObserver(self)
-        stopPermissionMonitoring()
-        stopGPSSignalMonitoring()
-        endBackgroundTaskIfNeeded()
-        dismissPendingAlert()
+        updateFrequencyTimer?.invalidate()
+        Task { @MainActor in
+            backgroundTaskManager.endTask(.locationUpdates)
+        }
+        print("LocationService deinitialized")
     }
     
     func requestLocationPermission() {
@@ -193,20 +255,31 @@ class LocationService: NSObject, LocationServiceProtocol, ObservableObject {
     }
     
     func startLocationUpdates() {
+        print("🔍 LocationService: startLocationUpdates called")
         clearLocationError()
         
-        guard locationManager.authorizationStatus == .authorizedWhenInUse || locationManager.authorizationStatus == .authorizedAlways else {
+        let currentStatus = locationManager.authorizationStatus
+        print("🔍 LocationService: Current auth status: \(currentStatus)")
+        
+        guard currentStatus == .authorizedWhenInUse || currentStatus == .authorizedAlways else {
+            print("🔍 LocationService: Permission not granted, requesting permission")
             locationError = .permissionDenied
             requestLocationPermission()
             return
         }
         
-        guard !isLocationUpdating else { return }
+        guard !isLocationUpdating else { 
+            print("🔍 LocationService: Already updating location")
+            return 
+        }
         
+        print("🔍 LocationService: Starting location manager updates")
         locationManager.startUpdatingLocation()
         isLocationUpdating = true
         locationUpdateRetryCount = 0
         lastLocationUpdateTime = Date()
+        
+        print("🔍 LocationService: Location updates started successfully")
     }
     
     func stopLocationUpdates() {
@@ -397,48 +470,133 @@ class LocationService: NSObject, LocationServiceProtocol, ObservableObject {
         }
     }
     
-    // MARK: - Background Support Methods
+    // MARK: - Adaptive Location Updates
     
-    @objc private func appDidEnterBackground() {
-        isInBackground = true
-        beginBackgroundTaskIfNeeded()
+    /// Update navigation state and adjust location configuration accordingly
+    func updateNavigationState(_ state: NavigationState) {
+        guard state != currentNavigationState else { return }
         
-        // Adjust location accuracy for background use
-        if isLocationUpdating {
-            locationManager.desiredAccuracy = kCLLocationAccuracyHundredMeters
-            locationManager.distanceFilter = 10.0 // Less frequent updates
-        }
+        currentNavigationState = state
+        
+        // Determine optimal configuration based on navigation state and background status
+        let newConfiguration = determineOptimalConfiguration(for: state)
+        applyLocationConfiguration(newConfiguration)
     }
     
-    @objc private func appWillEnterForeground() {
-        isInBackground = false
-        endBackgroundTaskIfNeeded()
-        
-        // Restore foreground accuracy
-        if isLocationUpdating {
-            locationManager.desiredAccuracy = kCLLocationAccuracyBest
-            locationManager.distanceFilter = 5.0
-        }
-        
-        // Check if permissions have changed while in background
-        checkPermissionChanges()
-    }
-    
-    private func beginBackgroundTaskIfNeeded() {
-        guard backgroundTaskIdentifier == .invalid else { return }
-        
-        backgroundTaskIdentifier = UIApplication.shared.beginBackgroundTask(withName: "LocationUpdates") { [weak self] in
-            Task { @MainActor in
-                self?.endBackgroundTaskIfNeeded()
+    private func determineOptimalConfiguration(for state: NavigationState) -> LocationUpdateConfiguration {
+        if isInBackground {
+            switch state {
+            case .idle, .calculating, .arrived:
+                return .background
+            case .navigating:
+                return .background
+            }
+        } else {
+            switch state {
+            case .idle, .arrived:
+                return .idle
+            case .calculating:
+                return .calculating
+            case .navigating(let mode):
+                return mode == .haptic ? .navigatingHaptic : .navigatingVisual
             }
         }
     }
     
-    private func endBackgroundTaskIfNeeded() {
-        guard backgroundTaskIdentifier != .invalid else { return }
+    private func applyLocationConfiguration(_ configuration: LocationUpdateConfiguration) {
+        // Only update if configuration has actually changed
+        guard currentConfiguration.desiredAccuracy != configuration.desiredAccuracy ||
+              currentConfiguration.distanceFilter != configuration.distanceFilter else {
+            return
+        }
         
-        UIApplication.shared.endBackgroundTask(backgroundTaskIdentifier)
-        backgroundTaskIdentifier = .invalid
+        // Update location manager settings
+        locationManager.desiredAccuracy = configuration.desiredAccuracy
+        locationManager.distanceFilter = configuration.distanceFilter
+        
+        // Update timer interval if needed
+        if configuration.updateInterval > 0 {
+            updateFrequencyTimer?.invalidate()
+            updateFrequencyTimer = Timer.scheduledTimer(withTimeInterval: configuration.updateInterval, repeats: true) { [weak self] _ in
+                // Placeholder for performance metrics collection
+                print("LocationService: Performance metrics collection placeholder")
+            }
+        }
+        
+        currentConfiguration = configuration
+        
+        print("LocationService: Applied configuration - accuracy: \(configuration.desiredAccuracy), filter: \(configuration.distanceFilter)m")
+    }
+    
+    private func processLocationQueue() {
+        guard !locationUpdateQueue.isEmpty else { return }
+        
+        // Process queued location updates
+        let locationsToProcess = Array(locationUpdateQueue.prefix(5)) // Process up to 5 at a time
+        locationUpdateQueue.removeFirst(min(5, locationUpdateQueue.count))
+        
+        for location in locationsToProcess {
+            DispatchQueue.main.async {
+                self.currentLocation = location
+            }
+        }
+    }
+    
+    // MARK: - Performance Monitoring
+    
+    private func startPerformanceMonitoring() {
+        Timer.scheduledTimer(withTimeInterval: performanceResetInterval, repeats: true) { [weak self] _ in
+            self?.resetPerformanceMetrics()
+        }
+    }
+    
+    private func stopPerformanceMonitoring() {
+        // Performance monitoring timer is handled automatically
+    }
+    
+    private func resetPerformanceMetrics() {
+        let timeInterval = Date().timeIntervalSince(lastPerformanceReset)
+        currentUpdateFrequency = Double(locationUpdateCount) / timeInterval
+        
+        locationUpdateCount = 0
+        lastPerformanceReset = Date()
+        
+        // Log performance metrics for debugging
+        print("Location update frequency: \(String(format: "%.2f", currentUpdateFrequency)) updates/sec")
+    }
+    
+    private func recordLocationUpdate() {
+        locationUpdateCount += 1
+        
+        // Manage location queue for batching
+        if locationUpdateQueue.count >= maxQueueSize {
+            locationUpdateQueue.removeFirst()
+        }
+    }
+    
+    // MARK: - Background Support Methods
+    
+    @objc private func appDidEnterBackground() {
+        print("App entered background - starting background location task")
+        Task { @MainActor in
+            let _ = backgroundTaskManager.beginTask(.locationUpdates)
+        }
+    }
+    
+    @objc private func appWillEnterForeground() {
+        print("App will enter foreground - ending background location task")
+        Task { @MainActor in
+            backgroundTaskManager.endTask(.locationUpdates)
+        }
+    }
+    
+    private func handleBackgroundTaskExpiration() {
+        print("Location background task expired")
+        // Optionally adjust location accuracy to extend battery life
+        if isLocationUpdating && isInBackground {
+            locationManager.desiredAccuracy = kCLLocationAccuracyKilometer
+            locationManager.distanceFilter = 100.0
+        }
     }
     
     private func startPermissionMonitoring() {
@@ -502,6 +660,11 @@ extension LocationService: CLLocationManagerDelegate {
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else { return }
         
+        print("🔍 LocationService: Received location update - lat: \(location.coordinate.latitude), lng: \(location.coordinate.longitude), accuracy: \(location.horizontalAccuracy)")
+        
+        // Record performance metrics
+        recordLocationUpdate()
+        
         // Reset retry count on successful location update
         locationUpdateRetryCount = 0
         
@@ -510,12 +673,16 @@ extension LocationService: CLLocationManagerDelegate {
         let isRecentLocation = locationAge < 5.0
         let isAccurateLocation = location.horizontalAccuracy < 100
         
+        print("🔍 LocationService: Location age: \(locationAge)s, accuracy: \(location.horizontalAccuracy)m, isRecent: \(isRecentLocation), isAccurate: \(isAccurateLocation)")
+        
         if isRecentLocation && isAccurateLocation {
             // Store last known good location
             lastKnownGoodLocation = location
             clearLocationError()
             
+            // Always update immediately for better user experience
             DispatchQueue.main.async {
+                print("🔍 LocationService: Updating currentLocation on main thread")
                 self.currentLocation = location
                 self.locationAccuracy = location.horizontalAccuracy
                 self.lastLocationUpdateTime = Date()
@@ -525,7 +692,15 @@ extension LocationService: CLLocationManagerDelegate {
                     self.clearLocationError()
                 }
             }
+            
+            // Also add to queue for potential batched processing if needed
+            locationUpdateQueue.append(location)
+            if locationUpdateQueue.count >= maxQueueSize {
+                locationUpdateQueue.removeFirst()
+            }
+            
         } else {
+            print("🔍 LocationService: Location rejected - age: \(locationAge)s, accuracy: \(location.horizontalAccuracy)m")
             // Handle poor quality location data
             if !isAccurateLocation && location.horizontalAccuracy > 500 {
                 DispatchQueue.main.async {
@@ -540,7 +715,7 @@ extension LocationService: CLLocationManagerDelegate {
     }
     
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        print("Location manager failed with error: \(error.localizedDescription)")
+        print("🔍 LocationService: Location manager failed with error: \(error.localizedDescription)")
         
         guard let clError = error as? CLError else {
             DispatchQueue.main.async {
@@ -552,23 +727,29 @@ extension LocationService: CLLocationManagerDelegate {
         DispatchQueue.main.async {
             switch clError.code {
             case .denied:
+                print("🔍 LocationService: Location denied")
                 self.locationError = .permissionDenied
                 self.stopLocationUpdates()
                 self.handleLocationPermissionDenied()
             case .locationUnknown:
+                print("🔍 LocationService: Location unknown")
                 self.locationError = .locationUnavailable
                 // Don't stop updates immediately - try to recover
                 self.attemptLocationRecovery()
             case .network:
+                print("🔍 LocationService: Network error")
                 self.locationError = .networkError
                 self.attemptLocationRecovery()
             case .headingFailure:
+                print("🔍 LocationService: Heading failure (not critical)")
                 // Heading errors don't affect location, continue
                 break
             case .rangingUnavailable, .rangingFailure:
+                print("🔍 LocationService: Ranging error (not critical)")
                 // Ranging errors don't affect basic location, continue
                 break
-            @unknown default:
+            default:
+                print("🔍 LocationService: Other location error: \(clError.localizedDescription)")
                 self.locationError = .locationUnavailable
                 self.attemptLocationRecovery()
             }

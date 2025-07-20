@@ -185,6 +185,31 @@ struct DesignTokens {
     struct Accessibility {
         static let minimumTouchTarget: CGFloat = 44
         static let preferredTouchTarget: CGFloat = 48
+        
+        // Dynamic Type scaling limits
+        static let maxFontScale: CGFloat = 2.0
+        static let minFontScale: CGFloat = 0.8
+        
+        // High contrast adjustments
+        static let highContrastBorderWidth: CGFloat = 2.0
+        static let standardBorderWidth: CGFloat = 1.0
+        
+        // VoiceOver announcements
+        struct Announcements {
+            static let navigationModeChanged = "Navigation mode changed"
+            static let routeCalculated = "Route calculated"
+            static let navigationStarted = "Navigation started"
+            static let navigationStopped = "Navigation stopped"
+            static let arrivalAnnounced = "Destination reached"
+            static let hapticUnavailable = "Haptic feedback not available"
+        }
+        
+        // Alternative feedback for haptic-disabled users
+        struct AlternativeFeedback {
+            static let audioEnabled = "audioFeedbackEnabled"
+            static let visualEnabled = "visualFeedbackEnabled"
+            static let speechEnabled = "speechFeedbackEnabled"
+        }
     }
 }
 
@@ -223,6 +248,46 @@ extension View {
             .fill(DesignTokens.Colors.border)
             .frame(width: 36, height: 5)
             .padding(.top, DesignTokens.Spacing.sm)
+    }
+    
+    // MARK: - Accessibility Extensions
+    
+    /// Apply accessibility-aware font scaling
+    func accessibleFont(_ font: Font) -> some View {
+        self.font(font)
+            .dynamicTypeSize(.xSmall ... .accessibility5)
+    }
+    
+    /// Apply high contrast border when needed
+    @ViewBuilder
+    func accessibleBorder(_ color: Color = DesignTokens.Colors.border) -> some View {
+        if UIAccessibility.isDarkerSystemColorsEnabled || UIAccessibility.isReduceTransparencyEnabled {
+            self.overlay(
+                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.md)
+                    .stroke(color, lineWidth: DesignTokens.Accessibility.highContrastBorderWidth)
+            )
+        } else {
+            self.overlay(
+                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.md)
+                    .stroke(color, lineWidth: DesignTokens.Accessibility.standardBorderWidth)
+            )
+        }
+    }
+    
+    /// Apply accessibility-optimized colors
+    @ViewBuilder
+    func accessibleBackgroundColor(_ color: Color) -> some View {
+        if UIAccessibility.isDarkerSystemColorsEnabled {
+            self.background(color.colorMultiply(Color.black.opacity(0.3)))
+        } else {
+            self.background(color)
+        }
+    }
+    
+    /// Add proper touch target size for accessibility
+    func accessibleTouchTarget() -> some View {
+        self.frame(minWidth: DesignTokens.Accessibility.minimumTouchTarget, 
+                  minHeight: DesignTokens.Accessibility.minimumTouchTarget)
     }
 }
 

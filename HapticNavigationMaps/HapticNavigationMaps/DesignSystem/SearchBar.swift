@@ -34,6 +34,7 @@ struct SearchBar: View {
                 TextField(placeholder, text: $text)
                     .focused($isTextFieldFocused)
                     .textFieldStyle(PlainTextFieldStyle())
+                    .font(DesignTokens.Typography.body)
                     .onSubmit {
                         onSearchButtonClicked()
                     }
@@ -42,21 +43,29 @@ struct SearchBar: View {
                             isSearching = focused
                         }
                     }
+                    .accessibilityLabel("Search location")
+                    .accessibilityHint("Enter location name to search for places")
+                    .accessibilityValue(text.isEmpty ? "Empty" : text)
                 
                 if !text.isEmpty {
                     Button(action: {
                         text = ""
+                        UIAccessibility.post(notification: .announcement, argument: "Search text cleared")
                     }) {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundColor(.secondary)
                             .font(.system(size: 16))
                     }
+                    .accessibilityLabel("Clear search")
+                    .accessibilityHint("Clears the current search text")
+                    .frame(minWidth: 44, minHeight: 44)
                 }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(Color(.systemGray6))
+            .accessibleBackgroundColor(Color(.systemGray6))
             .cornerRadius(10)
+            .accessibleBorder()
             
             if isSearching {
                 Button("Cancel") {
@@ -66,8 +75,13 @@ struct SearchBar: View {
                         isSearching = false
                         onCancelButtonClicked()
                     }
+                    UIAccessibility.post(notification: .announcement, argument: "Search cancelled")
                 }
                 .foregroundColor(.blue)
+                .font(DesignTokens.Typography.body)
+                .frame(minWidth: 44, minHeight: 44)
+                .accessibilityLabel("Cancel search")
+                .accessibilityHint("Cancels the current search and clears the text")
                 .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }

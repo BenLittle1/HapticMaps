@@ -19,24 +19,24 @@ struct SearchResultRow: View {
                 VStack(alignment: .leading, spacing: 4) {
                     // Title
                     Text(searchResult.title)
-                        .font(.headline)
+                        .accessibleFont(.headline)
                         .foregroundColor(.primary)
                         .multilineTextAlignment(.leading)
-                        .lineLimit(1)
+                        .lineLimit(UIApplication.shared.preferredContentSizeCategory.isAccessibilityCategory ? nil : 1)
                     
                     // Subtitle/Address
                     if !searchResult.subtitle.isEmpty {
                         Text(searchResult.subtitle)
-                            .font(.subheadline)
+                            .accessibleFont(.subheadline)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.leading)
-                            .lineLimit(2)
+                            .lineLimit(UIApplication.shared.preferredContentSizeCategory.isAccessibilityCategory ? nil : 2)
                     } else if !searchResult.formattedAddress.isEmpty {
                         Text(searchResult.formattedAddress)
-                            .font(.subheadline)
+                            .accessibleFont(.subheadline)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.leading)
-                            .lineLimit(2)
+                            .lineLimit(UIApplication.shared.preferredContentSizeCategory.isAccessibilityCategory ? nil : 2)
                     }
                 }
                 
@@ -46,7 +46,7 @@ struct SearchResultRow: View {
                 if let userLocation = userLocation {
                     VStack(alignment: .trailing, spacing: 2) {
                         Text(searchResult.formattedDistance(from: userLocation))
-                            .font(.caption)
+                            .accessibleFont(.caption)
                             .foregroundColor(.secondary)
                         
                         Image(systemName: "chevron.right")
@@ -60,6 +60,26 @@ struct SearchResultRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
+        .accessibilityLabel(searchResultAccessibilityLabel)
+        .accessibilityHint("Double tap to select this location")
+        .frame(minWidth: 44, minHeight: 44)
+    }
+    
+    private var searchResultAccessibilityLabel: String {
+        var label = searchResult.title
+        
+        if !searchResult.subtitle.isEmpty {
+            label += ", \(searchResult.subtitle)"
+        } else if !searchResult.formattedAddress.isEmpty {
+            label += ", \(searchResult.formattedAddress)"
+        }
+        
+        if let userLocation = userLocation {
+            let distance = searchResult.formattedDistance(from: userLocation)
+            label += ", \(distance) away"
+        }
+        
+        return label
     }
 }
 

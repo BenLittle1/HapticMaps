@@ -2,59 +2,65 @@ import Foundation
 import MapKit
 import CoreLocation
 
-/// Service for handling location search and geocoding operations with enhanced error recovery
+/// Optimized service for handling location search operations with fast response times
 class SearchService: SearchServiceProtocol {
     
     // MARK: - Properties
     
     private let geocoder = CLGeocoder()
     private var activeSearchTasks: Set<Task<Void, Never>> = []
-    private let maxRetryAttempts = 3
-    private let searchTimeout: TimeInterval = 30.0
+    
+    // Optimized for speed - shorter timeout and no heavy retry logic
+    private let searchTimeout: TimeInterval = 8.0 // Reduced from 30s
+    private let maxRetryAttempts = 2 // Reduced from 3
     
     // MARK: - SearchServiceProtocol Implementation
     
-    /// Search for locations based on a text query using MKLocalSearch with retry logic
+    /// Search for locations based on a text query - optimized for speed
     func searchLocations(query: String) async throws -> [SearchResult] {
-        return try await performSearchWithRetry { [weak self] in
-            try await self?.performLocationSearch(query: query) ?? []
-        }
-    }
-    
-    /// Reverse geocode a location to get place information with retry logic
-    func reverseGeocode(location: CLLocation) async throws -> [CLPlacemark] {
-        return try await performGeocodingWithRetry { [weak self] in
-            try await self?.performReverseGeocode(location: location) ?? []
-        }
-    }
-    
-    // MARK: - Private Implementation Methods
-    
-    private func performLocationSearch(query: String) async throws -> [SearchResult] {
-        // Validate input
-        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        // Validate input quickly
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else {
             throw SearchError.emptyQuery
         }
         
-        // Create search request
+        // Perform search with reduced timeout for faster response
+        return try await performLocationSearch(query: trimmedQuery)
+    }
+    
+    /// Reverse geocode a location to get place information
+    func reverseGeocode(location: CLLocation) async throws -> [CLPlacemark] {
+        guard CLLocationCoordinate2DIsValid(location.coordinate) else {
+            throw SearchError.invalidLocation
+        }
+        
+        return try await performReverseGeocode(location: location)
+    }
+    
+    // MARK: - Optimized Implementation Methods
+    
+    private func performLocationSearch(query: String) async throws -> [SearchResult] {
         let request = MKLocalSearch.Request()
         request.naturalLanguageQuery = query
         
-        // Perform search with timeout
+        // Set result types for faster searches
+        if #available(iOS 13.0, *) {
+            request.resultTypes = [.pointOfInterest, .address]
+        }
+        
         return try await withThrowingTaskGroup(of: [SearchResult].self) { group in
             // Add the main search task
-            group.addTask { [weak self] in
-                guard let self = self else { throw SearchError.searchCanceled }
-                return try await self.executeSearch(request: request)
+            group.addTask {
+                return try await self.executeSearchFast(request: request)
             }
             
-            // Add timeout task
+            // Add timeout task with reduced timeout
             group.addTask {
                 try await Task.sleep(nanoseconds: UInt64(self.searchTimeout * 1_000_000_000))
                 throw SearchError.searchTimeout
             }
             
-            // Wait for first result (either success or timeout)
+            // Return first result (either success or timeout)
             guard let result = try await group.next() else {
                 throw SearchError.serviceUnavailable
             }
@@ -64,39 +70,34 @@ class SearchService: SearchServiceProtocol {
         }
     }
     
-    private func executeSearch(request: MKLocalSearch.Request) async throws -> [SearchResult] {
+    private func executeSearchFast(request: MKLocalSearch.Request) async throws -> [SearchResult] {
         let search = MKLocalSearch(request: request)
         
         do {
             let response = try await search.start()
             
-            // Check if we have results
             guard !response.mapItems.isEmpty else {
                 throw SearchError.noResults
             }
             
-            // Transform MKMapItem to SearchResult
-            let searchResults = response.mapItems.map { mapItem in
+            // Transform results quickly
+            let searchResults = response.mapItems.compactMap { mapItem in
                 SearchResult(mapItem: mapItem)
             }
             
             return searchResults
             
-        } catch let error as SearchError {
-            // Re-throw our custom errors
-            throw error
         } catch {
-            // Analyze the underlying error to provide better error classification
-            throw classifySearchError(error)
+            // Simplified error handling for speed
+            if let error = error as? SearchError {
+                throw error
+            } else {
+                throw SearchError.networkError(error)
+            }
         }
     }
     
     private func performReverseGeocode(location: CLLocation) async throws -> [CLPlacemark] {
-        // Validate location
-        guard CLLocationCoordinate2DIsValid(location.coordinate) else {
-            throw SearchError.invalidLocation
-        }
-        
         do {
             let placemarks = try await geocoder.reverseGeocodeLocation(location)
             
@@ -107,131 +108,20 @@ class SearchService: SearchServiceProtocol {
             return placemarks
             
         } catch {
-            throw classifyGeocodingError(error)
-        }
-    }
-    
-    // MARK: - Retry Logic
-    
-    private func performSearchWithRetry<T>(_ operation: @escaping () async throws -> T) async throws -> T {
-        var lastError: SearchError?
-        
-        for attempt in 1...maxRetryAttempts {
-            do {
-                return try await operation()
-            } catch let error as SearchError {
-                lastError = error
-                
-                // Don't retry non-retryable errors
-                guard error.isRetryable && attempt < maxRetryAttempts else {
-                    throw error
-                }
-                
-                // Wait before retrying
-                let delay = error.retryDelay * Double(attempt) // Exponential backoff
-                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                
-            } catch {
-                // Handle unexpected errors
-                let searchError = SearchError.networkError(error)
-                lastError = searchError
-                
-                guard attempt < maxRetryAttempts else {
-                    throw searchError
-                }
-                
-                try await Task.sleep(nanoseconds: UInt64(2.0 * Double(attempt) * 1_000_000_000))
-            }
-        }
-        
-        throw lastError ?? SearchError.serviceUnavailable
-    }
-    
-    private func performGeocodingWithRetry<T>(_ operation: @escaping () async throws -> T) async throws -> T {
-        var lastError: SearchError?
-        
-        for attempt in 1...maxRetryAttempts {
-            do {
-                return try await operation()
-            } catch let error as SearchError {
-                lastError = error
-                
-                // Only retry network-related geocoding errors
-                guard case .networkError = error, attempt < maxRetryAttempts else {
-                    throw error
-                }
-                
-                let delay = 2.0 * Double(attempt)
-                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                
-            } catch {
-                let searchError = SearchError.geocodingFailed(error)
-                lastError = searchError
-                
-                guard attempt < maxRetryAttempts else {
-                    throw searchError
-                }
-                
-                try await Task.sleep(nanoseconds: UInt64(2.0 * Double(attempt) * 1_000_000_000))
-            }
-        }
-        
-        throw lastError ?? SearchError.serviceUnavailable
-    }
-    
-    // MARK: - Error Classification
-    
-    private func classifySearchError(_ error: Error) -> SearchError {
-        let nsError = error as NSError
-        
-        // Check for specific error codes that indicate different types of failures
-        switch nsError.code {
-        case NSURLErrorTimedOut, NSURLErrorCannotConnectToHost:
-            return .searchTimeout
-        case NSURLErrorNotConnectedToInternet, NSURLErrorNetworkConnectionLost:
-            return .networkError(error)
-        case NSURLErrorBadServerResponse, NSURLErrorCannotFindHost:
-            return .serviceUnavailable
-        case NSURLErrorResourceUnavailable:
-            return .rateLimitExceeded
-        default:
-            // Check domain-specific errors
-            if nsError.domain == MKErrorDomain {
-                switch nsError.code {
-                case Int(MKError.placemarkNotFound.rawValue):
-                    return .noResults
-                case Int(MKError.loadingThrottled.rawValue):
-                    return .rateLimitExceeded
-                case Int(MKError.serverFailure.rawValue):
-                    return .serviceUnavailable
+            if let clError = error as? CLError {
+                switch clError.code {
+                case .network:
+                    throw SearchError.networkError(error)
+                case .geocodeCanceled:
+                    throw SearchError.searchCanceled
+                case .geocodeFoundNoResult:
+                    throw SearchError.noResults
                 default:
-                    return .serviceUnavailable
+                    throw SearchError.geocodingFailed(error)
                 }
             }
-            
-            return .networkError(error)
+            throw SearchError.geocodingFailed(error)
         }
-    }
-    
-    private func classifyGeocodingError(_ error: Error) -> SearchError {
-        let nsError = error as NSError
-        
-        if nsError.domain == kCLErrorDomain {
-            switch nsError.code {
-            case CLError.network.rawValue:
-                return .networkError(error)
-            case CLError.geocodeCanceled.rawValue:
-                return .searchCanceled
-            case CLError.geocodeFoundNoResult.rawValue:
-                return .noResults
-            case CLError.geocodeFoundPartialResult.rawValue:
-                return .noResults
-            default:
-                return .geocodingFailed(error)
-            }
-        }
-        
-        return .geocodingFailed(error)
     }
     
     // MARK: - Task Management
@@ -253,22 +143,39 @@ class SearchService: SearchServiceProtocol {
 // MARK: - Extensions
 
 extension SearchService {
-    /// Search for locations with a region bias for more relevant results and retry logic
+    /// Search for locations with a region bias for more relevant results
     func searchLocations(query: String, in region: MKCoordinateRegion) async throws -> [SearchResult] {
-        return try await performSearchWithRetry { [weak self] in
-            try await self?.performLocationSearchInRegion(query: query, region: region) ?? []
-        }
-    }
-    
-    private func performLocationSearchInRegion(query: String, region: MKCoordinateRegion) async throws -> [SearchResult] {
-        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else {
             throw SearchError.emptyQuery
         }
         
         let request = MKLocalSearch.Request()
-        request.naturalLanguageQuery = query
+        request.naturalLanguageQuery = trimmedQuery
         request.region = region
         
-        return try await executeSearch(request: request)
+        // Set result types for faster searches
+        if #available(iOS 13.0, *) {
+            request.resultTypes = [.pointOfInterest, .address]
+        }
+        
+        return try await executeSearchFast(request: request)
+    }
+    
+    /// Quick search for common categories
+    func searchCategory(_ category: String, in region: MKCoordinateRegion? = nil) async throws -> [SearchResult] {
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = category
+        
+        if let region = region {
+            request.region = region
+        }
+        
+        // Optimize for category searches
+        if #available(iOS 13.0, *) {
+            request.resultTypes = [.pointOfInterest]
+        }
+        
+        return try await executeSearchFast(request: request)
     }
 }

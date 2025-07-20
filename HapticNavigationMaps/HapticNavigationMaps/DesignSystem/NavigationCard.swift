@@ -34,21 +34,28 @@ struct NavigationCard: View {
                     
                     Spacer()
                     
-                    Button(action: onStopNavigation) {
+                    Button(action: {
+                        onStopNavigation()
+                        UIAccessibility.post(notification: .announcement, argument: DesignTokens.Accessibility.Announcements.navigationStopped)
+                    }) {
                         HStack(spacing: 4) {
                             Image(systemName: "stop.fill")
                                 .font(.system(size: 12))
                             
                             Text("Stop")
-                                .font(.subheadline)
+                                .accessibleFont(.subheadline)
                                 .fontWeight(.medium)
                         }
                         .foregroundColor(.red)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
-                        .background(Color.red.opacity(0.1))
+                        .accessibleBackgroundColor(Color.red.opacity(0.1))
                         .cornerRadius(16)
+                        .accessibleBorder(.red)
                     }
+                    .frame(minWidth: 44, minHeight: 44)
+                    .accessibilityLabel("Stop navigation")
+                    .accessibilityHint("Stops the current navigation session")
                 }
                 
                 // Main instruction display
@@ -73,9 +80,12 @@ struct NavigationCard: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 20)
         }
-        .background(Color(.systemBackground))
+        .accessibleBackgroundColor(Color(.systemBackground))
         .cornerRadius(16, corners: [.topLeft, .topRight])
         .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: -2)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Navigation control panel")
+        .accessibilityHint("Contains current navigation instructions and controls")
     }
     
     private var currentNavigationMode: NavigationMode {
@@ -111,12 +121,12 @@ struct CurrentInstructionDisplay: View {
                 VStack(alignment: .leading, spacing: 4) {
                     // Distance to maneuver
                     Text(formattedDistance)
-                        .font(.title)
+                        .accessibleFont(.title)
                         .fontWeight(.bold)
                         .foregroundColor(.primary)
                     
                     Text(distanceUnit)
-                        .font(.subheadline)
+                        .accessibleFont(.subheadline)
                         .foregroundColor(.secondary)
                 }
                 
@@ -129,6 +139,9 @@ struct CurrentInstructionDisplay: View {
                 .foregroundColor(.primary)
                 .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityLabel("Navigation instruction")
+                .accessibilityValue(step.instructions)
+                .accessibilityHint("Current turn-by-turn direction")
         }
     }
     

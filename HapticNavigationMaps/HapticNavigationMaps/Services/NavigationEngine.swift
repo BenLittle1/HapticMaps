@@ -19,7 +19,7 @@ class NavigationEngine: NavigationEngineProtocol {
     private var routeProgress: CLLocationDistance = 0
     private let stepProximityThreshold: CLLocationDistance = 50 // meters
     private var currentLocation: CLLocation?
-    private var routeCalculationTask: Task<Void, Never>?
+    private var routeCalculationTask: Task<MKDirections.Response, Error>?
     
     // MARK: - Haptic Integration Properties
     private let hapticService: any HapticNavigationServiceProtocol
@@ -40,13 +40,9 @@ class NavigationEngine: NavigationEngineProtocol {
     
     // MARK: - NavigationEngineProtocol Implementation
     
-    /// Calculate route to destination using MKDirections with retry logic
+    /// Calculate route to destination using MKDirections with simplified, reliable logic
     func calculateRoute(to destination: MKMapItem) async throws -> MKRoute {
-        return try await performRouteCalculationWithRetry(to: destination)
-    }
-    
-    private func performRouteCalculationWithRetry(to destination: MKMapItem, attempt: Int = 1) async throws -> MKRoute {
-        let maxRetryAttempts = 3
+        print("🗺️ NavigationEngine: Starting route calculation to \(destination.name ?? "unknown destination")")
         
         // Cancel any existing route calculation
         cancelRouteCalculation()
@@ -56,22 +52,60 @@ class NavigationEngine: NavigationEngineProtocol {
         
         // Set calculating state
         navigationState = .calculating
+        print("🗺️ NavigationEngine: State set to calculating")
         
         // Ensure we have a current location
         guard let currentLocation = currentLocation else {
+            print("🗺️ NavigationEngine: ERROR - No current location available")
             navigationState = .idle
             let error = NavigationError.noCurrentLocation
             routeCalculationError = error
             throw error
         }
         
+        print("🗺️ NavigationEngine: Using current location: \(currentLocation.coordinate)")
+        
+        // Create and track the route calculation task
+        let task = Task {
+            try await withThrowingTaskGroup(of: MKDirections.Response.self) { group in
+                // Add route calculation task
+                group.addTask {
+                    print("🗺️ NavigationEngine: Starting MKDirections request")
+                    let request = MKDirections.Request()
+                    request.source = MKMapItem(placemark: MKPlacemark(coordinate: currentLocation.coordinate))
+                    request.destination = destination
+                    request.transportType = .walking
+                    request.requestsAlternateRoutes = true
+                    
+                    let directions = MKDirections(request: request)
+                    let response = try await directions.calculate()
+                    print("🗺️ NavigationEngine: MKDirections completed with \(response.routes.count) routes")
+                    return response
+                }
+                
+                // Add simplified timeout
+                group.addTask {
+                    try await Task.sleep(nanoseconds: 15_000_000_000) // 15 seconds
+                    print("🗺️ NavigationEngine: Route calculation timed out after 15 seconds")
+                    throw NavigationError.routeCalculationTimeout
+                }
+                
+                // Get first result and cancel the group
+                let result = try await group.next()!
+                group.cancelAll()
+                return result
+            }
+        }
+        
+        // Store task for cancellation
+        routeCalculationTask = task
+        
         do {
-            let route = try await performSingleRouteCalculation(
-                from: currentLocation,
-                to: destination
-            )
+            // Wait for the route calculation to complete
+            let directionsResponse = try await task.value
             
-            guard !route.routes.isEmpty else {
+            guard !directionsResponse.routes.isEmpty else {
+                print("🗺️ NavigationEngine: ERROR - No routes found in response")
                 navigationState = .idle
                 let error = NavigationError.noRouteFound
                 routeCalculationError = error
@@ -79,84 +113,44 @@ class NavigationEngine: NavigationEngineProtocol {
             }
             
             // Store all available routes
-            availableRoutes = route.routes
-            currentRoute = route.routes.first
+            availableRoutes = directionsResponse.routes
+            currentRoute = directionsResponse.routes.first
             navigationState = .idle
+            routeCalculationTask = nil
             
-            return route.routes.first!
+            print("🗺️ NavigationEngine: ✅ Route calculation successful! Found \(directionsResponse.routes.count) routes")
+            print("🗺️ NavigationEngine: Primary route distance: \(directionsResponse.routes.first!.distance)m, time: \(directionsResponse.routes.first!.expectedTravelTime)s")
             
-        } catch let navError as NavigationError {
-            // Handle retryable errors
-            if navError.isRetryable && attempt < maxRetryAttempts {
-                let delay = navError.retryDelay * Double(attempt) // Exponential backoff
-                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                
-                return try await performRouteCalculationWithRetry(
-                    to: destination,
-                    attempt: attempt + 1
-                )
-            } else {
-                // Always reset state on final error
-                navigationState = .idle
-                routeCalculationError = navError
-                throw navError
-            }
+            return directionsResponse.routes.first!
+            
         } catch {
-            // Classify and handle unexpected errors
-            let classifiedError = classifyRouteCalculationError(error)
+            print("🗺️ NavigationEngine: ERROR - Route calculation failed: \(error)")
             
-            if classifiedError.isRetryable && attempt < maxRetryAttempts {
-                let delay = classifiedError.retryDelay * Double(attempt)
-                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                
-                return try await performRouteCalculationWithRetry(
-                    to: destination,
-                    attempt: attempt + 1
-                )
-            } else {
-                navigationState = .idle
-                routeCalculationError = classifiedError
-                throw classifiedError
+            // Always reset state on error
+            navigationState = .idle
+            routeCalculationTask = nil
+            
+            // Handle cancellation
+            if error is CancellationError {
+                routeCalculationError = NavigationError.calculationCanceled
+                throw NavigationError.calculationCanceled
             }
+            
+            // Classify the error for better user feedback
+            let classifiedError: NavigationError
+            if let navError = error as? NavigationError {
+                classifiedError = navError
+            } else {
+                classifiedError = classifyRouteCalculationError(error)
+            }
+            
+            routeCalculationError = classifiedError
+            print("🗺️ NavigationEngine: Classified error as: \(classifiedError)")
+            throw classifiedError
         }
     }
     
-    private func performSingleRouteCalculation(
-        from source: CLLocation,
-        to destination: MKMapItem
-    ) async throws -> MKDirections.Response {
-        return try await withThrowingTaskGroup(of: MKDirections.Response.self) { group in
-            // Add the main route calculation task
-            group.addTask {
-                let request = MKDirections.Request()
-                request.source = MKMapItem(placemark: MKPlacemark(coordinate: source.coordinate))
-                request.destination = destination
-                request.transportType = .walking
-                request.requestsAlternateRoutes = true
-                
-                let directions = MKDirections(request: request)
-                return try await directions.calculate()
-            }
-            
-            // Add timeout task
-            group.addTask {
-                try await Task.sleep(nanoseconds: 30_000_000_000) // 30 seconds
-                throw NavigationError.routeCalculationTimeout
-            }
-            
-            // Wait for first result (either success or timeout)
-            guard let response = try await group.next() else {
-                throw NavigationError.routeCalculationFailed(
-                    NSError(domain: "NavigationEngine", code: -1, userInfo: [
-                        NSLocalizedDescriptionKey: "No response received"
-                    ])
-                )
-            }
-            
-            group.cancelAll()
-            return response
-        }
-    }
+    // MARK: - Private Methods - Route Calculation Error Handling
     
     private func classifyRouteCalculationError(_ error: Error) -> NavigationError {
         let nsError = error as NSError
@@ -297,11 +291,15 @@ class NavigationEngine: NavigationEngineProtocol {
     
     /// Cancel ongoing route calculation
     func cancelRouteCalculation() {
+        print("🗺️ NavigationEngine: Canceling route calculation")
         routeCalculationTask?.cancel()
         routeCalculationTask = nil
         if navigationState == .calculating {
             navigationState = .idle
+            print("🗺️ NavigationEngine: State reset to idle after cancellation")
         }
+        // Clear any calculation errors when manually canceling
+        routeCalculationError = nil
     }
     
     // MARK: - Private Methods

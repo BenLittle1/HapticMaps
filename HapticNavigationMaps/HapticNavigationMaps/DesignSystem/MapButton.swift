@@ -27,8 +27,83 @@ struct MapButton: View {
         self.isEnabled = isEnabled
     }
     
+    // MARK: - Accessibility Properties
+    
+    private var accessibilityLabel: String {
+        if let label = label {
+            return label
+        } else {
+            return accessibilityLabelForIcon(icon)
+        }
+    }
+    
+    private var accessibilityHint: String {
+        switch style {
+        case .primary:
+            return "Primary action button"
+        case .secondary:
+            return "Secondary action button"
+        case .tertiary:
+            return "Tertiary action button"
+        case .destructive:
+            return "Destructive action - use with caution"
+        case .ghost:
+            return "Action button"
+        }
+    }
+    
+    private var accessibilityTraits: AccessibilityTraits {
+        var traits: AccessibilityTraits = []
+        
+        if style == .destructive {
+            traits.formUnion([.allowsDirectInteraction])
+        }
+        
+        return traits
+    }
+    
+    private func accessibilityLabelForIcon(_ iconName: String) -> String {
+        switch iconName {
+        case "location.fill", "location":
+            return "Location"
+        case "play.fill", "play":
+            return "Start"
+        case "stop.fill", "stop":
+            return "Stop"
+        case "pause.fill", "pause":
+            return "Pause"
+        case "magnifyingglass":
+            return "Search"
+        case "map":
+            return "Map"
+        case "person.fill", "person":
+            return "Profile"
+        case "gear", "gearshape.fill":
+            return "Settings"
+        case "plus":
+            return "Add"
+        case "minus":
+            return "Remove"
+        case "arrow.left":
+            return "Back"
+        case "arrow.right":
+            return "Forward"
+        case "xmark":
+            return "Close"
+        default:
+            return "Button"
+        }
+    }
+    
     var body: some View {
-        Button(action: action) {
+        Button(action: {
+            action()
+            // Provide haptic feedback for button press if haptics are available
+            if UIDevice.current.userInterfaceIdiom == .phone {
+                let impact = UIImpactFeedbackGenerator(style: .light)
+                impact.impactOccurred()
+            }
+        }) {
             HStack(spacing: size.iconSpacing) {
                 Image(systemName: icon)
                     .font(.system(size: size.iconSize, weight: .medium))
@@ -36,7 +111,7 @@ struct MapButton: View {
                 
                 if let label = label {
                     Text(label)
-                        .font(size.font)
+                        .accessibleFont(size.font)
                         .fontWeight(.medium)
                         .foregroundColor(style.foregroundColor(isEnabled: isEnabled))
                 }
@@ -50,7 +125,12 @@ struct MapButton: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: size.cornerRadius)
-                    .stroke(style.borderColor(isEnabled: isEnabled), lineWidth: style.borderWidth)
+                    .stroke(
+                        style.borderColor(isEnabled: isEnabled), 
+                        lineWidth: UIAccessibility.isDarkerSystemColorsEnabled ? 
+                            DesignTokens.Accessibility.highContrastBorderWidth : 
+                            style.borderWidth
+                    )
             )
             .scaleEffect(isPressed ? 0.95 : 1.0)
             .shadow(
@@ -61,9 +141,16 @@ struct MapButton: View {
             )
         }
         .disabled(!isEnabled)
-        .onLongPressGesture(minimumDuration: 0, maximumDistance: .infinity, pressing: { pressing in
-            withAnimation(DesignTokens.Animation.quick) {
+        .frame(minWidth: 44, minHeight: 44)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint(accessibilityHint)
+        .onLongPressGesture(minimumDuration: 0, maximumDistance: CGFloat.infinity, pressing: { pressing in
+            if UIAccessibility.isReduceMotionEnabled {
                 isPressed = pressing
+            } else {
+                withAnimation(DesignTokens.Animation.quick) {
+                    isPressed = pressing
+                }
             }
         }, perform: {})
     }

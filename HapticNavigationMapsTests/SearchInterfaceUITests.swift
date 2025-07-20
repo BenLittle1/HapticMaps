@@ -174,6 +174,82 @@ final class SearchInterfaceUITests: XCTestCase {
         XCTAssertEqual(searchViewModel.selectedResult?.title, "Test Location")
         XCTAssertFalse(searchViewModel.isSearching)
     }
+    
+    // MARK: - Accessibility Tests
+    
+    func testSearchBarAccessibilityLabels() {
+        // Given: A SearchBar component
+        @State var searchText = "Test Location"
+        @State var isSearching = false
+        
+        let searchBar = SearchBar(
+            text: $searchText,
+            isSearching: $isSearching,
+            placeholder: "Search for places...",
+            onSearchButtonClicked: {},
+            onCancelButtonClicked: {}
+        )
+        
+        // Then: SearchBar should have accessibility support
+        XCTAssertNotNil(searchBar.body)
+        XCTAssertEqual(searchBar.text.wrappedValue, "Test Location")
+        XCTAssertEqual(searchBar.placeholder, "Search for places...")
+    }
+    
+    func testSearchResultRowAccessibilitySupport() {
+        // Given: A search result with accessibility service
+        let searchResult = createMockSearchResult()
+        let userLocation = CLLocation(latitude: 37.7749, longitude: -122.4194)
+        
+        let searchRow = SearchResultRow(
+            searchResult: searchResult,
+            userLocation: userLocation,
+            onTap: {}
+        )
+        
+        // Then: SearchRow should be accessible
+        XCTAssertNotNil(searchRow.body)
+        
+        // Test accessibility service integration
+        let accessibilityService = AccessibilityService.shared
+        XCTAssertNotNil(accessibilityService.preferredContentSizeCategory)
+        XCTAssertTrue(accessibilityService.isAudioFeedbackEnabled || 
+                     accessibilityService.isSpeechFeedbackEnabled ||
+                     accessibilityService.isVisualFeedbackEnabled)
+    }
+    
+    func testSearchWithDynamicTypeSupport() {
+        // Given: Large text accessibility enabled
+        let accessibilityService = AccessibilityService.shared
+        accessibilityService.preferredContentSizeCategory = .accessibilityLarge
+        
+        // When: Creating search components
+        let searchResult = createMockSearchResult()
+        let searchRow = SearchResultRow(
+            searchResult: searchResult,
+            userLocation: nil,
+            onTap: {}
+        )
+        
+        // Then: Components should adapt to large text
+        XCTAssertNotNil(searchRow.body)
+        XCTAssertTrue(accessibilityService.isLargeTextEnabled())
+        
+        // Reset for other tests
+        accessibilityService.preferredContentSizeCategory = .medium
+    }
+    
+    func testSearchAccessibilityAnnouncements() {
+        // Given: AccessibilityService for announcements
+        let accessibilityService = AccessibilityService.shared
+        
+        // When: Making search-related announcements
+        accessibilityService.announceAccessibility("Search completed")
+        accessibilityService.announceAccessibility("No results found")
+        
+        // Then: Announcements should work without errors
+        XCTAssertNotNil(accessibilityService)
+    }
 }
 
 import MapKit

@@ -50,6 +50,9 @@
 		A1000129 /* DependencyContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000130 /* DependencyContainer.swift */; };
 		A1000131 /* AppCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000132 /* AppCoordinator.swift */; };
 		A1000133 /* AppIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000134 /* AppIntegrationTests.swift */; };
+		A1000135 /* HapticMapsLogo.png in Resources */ = {isa = PBXBuildFile; fileRef = A1000136 /* HapticMapsLogo.png */; };
+		A1000137 /* BackgroundTaskManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000138 /* BackgroundTaskManager.swift */; };
+		A1000139 /* PerformanceMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000140 /* PerformanceMonitor.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -110,6 +113,9 @@
 		A1000130 /* DependencyContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DependencyContainer.swift; sourceTree = "<group>"; };
 		A1000132 /* AppCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCoordinator.swift; sourceTree = "<group>"; };
 		A1000134 /* AppIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIntegrationTests.swift; sourceTree = "<group>"; };
+		A1000136 /* HapticMapsLogo.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = HapticMapsLogo.png; sourceTree = "<group>"; };
+		A1000138 /* BackgroundTaskManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundTaskManager.swift; sourceTree = "<group>"; };
+		A1000140 /* PerformanceMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceMonitor.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -148,6 +154,7 @@
 				A1000033 /* Models */,
 				A1000034 /* ViewModels */,
 				A1000035 /* DesignSystem */,
+				A1000136 /* HapticMapsLogo.png */,
 				A1000023 /* Info.plist */,
 			);
 			path = HapticNavigationMaps;
@@ -208,6 +215,8 @@
 				A1000092 /* UserPreferences.swift */,
 				A1000130 /* DependencyContainer.swift */,
 				A1000132 /* AppCoordinator.swift */,
+				A1000138 /* BackgroundTaskManager.swift */,
+				A1000140 /* PerformanceMonitor.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -294,7 +303,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1540;
-				LastUpgradeCheck = 1540;
+				LastUpgradeCheck = 1620;
 				TargetAttributes = {
 					A1000021 = {
 						CreatedOnToolsVersion = 15.4;
@@ -329,6 +338,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1000135 /* HapticMapsLogo.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -375,6 +385,8 @@
 				A1000097 /* HapticNavigationServiceProtocol.swift in Sources */,
 				A1000129 /* DependencyContainer.swift in Sources */,
 				A1000131 /* AppCoordinator.swift in Sources */,
+				A1000137 /* BackgroundTaskManager.swift in Sources */,
+				A1000139 /* PerformanceMonitor.swift in Sources */,
 				A1000121 /* DesignTokens.swift in Sources */,
 				A1000123 /* MapButton.swift in Sources */,
 			);
@@ -536,7 +548,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = CJ4UUD37KK;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = HapticNavigationMaps/Info.plist;
@@ -565,7 +577,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = CJ4UUD37KK;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = HapticNavigationMaps/Info.plist;
@@ -590,7 +602,6 @@
 		A1000049 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -610,7 +621,6 @@
 		A1000050 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;

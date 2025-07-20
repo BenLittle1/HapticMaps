@@ -19,59 +19,79 @@ struct MapView: View {
     @State private var routeErrorMessage = ""
     @State private var showingModeSettings = false
     
+    // MARK: - Tap-to-Navigate State
+    @State private var tappedLocation: TappedLocation?
+    @State private var showingTappedLocationOptions = false
+    
     var body: some View {
         ZStack {
-            // Map View
-            Map(position: $cameraPosition) {
-                // Current location annotation
-                if let location = locationService.currentLocation {
-                    Annotation("Current Location", coordinate: location.coordinate) {
-                        Circle()
-                            .fill(.blue)
-                            .stroke(.white, lineWidth: 2)
-                            .frame(width: 20, height: 20)
+            // Map View with MapReader for coordinate conversion
+            MapReader { mapProxy in
+                Map(position: $cameraPosition) {
+                    // Current location annotation
+                    if let location = locationService.currentLocation {
+                        Annotation("Current Location", coordinate: location.coordinate) {
+                            Circle()
+                                .fill(.blue)
+                                .stroke(.white, lineWidth: 2)
+                                .frame(width: 20, height: 20)
+                        }
                     }
-                }
-                
-                // Search result annotations
-                ForEach(searchViewModel.searchResults) { result in
-                    Annotation(result.title, coordinate: result.coordinate) {
-                        Image(systemName: "mappin.circle.fill")
-                            .foregroundColor(.red)
-                            .font(.system(size: 30))
-                            .background(Circle().fill(.white).frame(width: 32, height: 32))
+                    
+                    // Search result annotations
+                    ForEach(searchViewModel.searchResults) { result in
+                        Annotation(result.title, coordinate: result.coordinate) {
+                            Image(systemName: "mappin.circle.fill")
+                                .foregroundColor(.red)
+                                .font(.system(size: 30))
+                                .background(Circle().fill(.white).frame(width: 32, height: 32))
+                        }
+                        .annotationTitles(.hidden)
                     }
-                    .annotationTitles(.hidden)
-                }
-                
-                // Selected annotation (highlighted)
-                if let selected = selectedAnnotation {
-                    Annotation(selected.title, coordinate: selected.coordinate) {
-                        Image(systemName: "mappin.circle.fill")
-                            .foregroundColor(.green)
-                            .font(.system(size: 35))
-                            .background(Circle().fill(.white).frame(width: 38, height: 38))
+                    
+                    // Selected annotation (highlighted)
+                    if let selected = selectedAnnotation {
+                        Annotation(selected.title, coordinate: selected.coordinate) {
+                            Image(systemName: "mappin.circle.fill")
+                                .foregroundColor(.green)
+                                .font(.system(size: 35))
+                                .background(Circle().fill(.white).frame(width: 38, height: 38))
+                        }
                     }
-                }
-                
-                // Route polylines
-                ForEach(Array(navigationEngine.availableRoutes.enumerated()), id: \.offset) { index, route in
-                    MapPolyline(route.polyline)
-                        .stroke(
-                            index == selectedRouteIndex ? .blue : .gray,
-                            style: StrokeStyle(
-                                lineWidth: index == selectedRouteIndex ? 6 : 4,
-                                lineCap: .round,
-                                lineJoin: .round
+                    
+                    // Tapped location annotation
+                    if let tapped = tappedLocation {
+                        Annotation("Tapped Location", coordinate: tapped.coordinate) {
+                            Image(systemName: "location.fill")
+                                .foregroundColor(.orange)
+                                .font(.system(size: 30))
+                                .background(Circle().fill(.white).frame(width: 32, height: 32))
+                        }
+                        .annotationTitles(.hidden)
+                    }
+                    
+                    // Route polylines
+                    ForEach(Array(navigationEngine.availableRoutes.enumerated()), id: \.offset) { index, route in
+                        MapPolyline(route.polyline)
+                            .stroke(
+                                index == selectedRouteIndex ? .blue : .gray,
+                                style: StrokeStyle(
+                                    lineWidth: index == selectedRouteIndex ? 6 : 4,
+                                    lineCap: .round,
+                                    lineJoin: .round
+                                )
                             )
-                        )
+                    }
                 }
-            }
-            .mapStyle(.standard)
-            .mapControls {
-                MapUserLocationButton()
-                MapCompass()
-                MapScaleView()
+                .mapStyle(.standard)
+                .mapControls {
+                    MapUserLocationButton()
+                    MapCompass()
+                    MapScaleView()
+                }
+                .onTapGesture { tapLocation in
+                    handleMapTap(at: tapLocation, mapProxy: mapProxy)
+                }
             }
             .onAppear {
                 setupLocationTracking()
@@ -87,12 +107,6 @@ struct MapView: View {
             }
             .onChange(of: searchViewModel.selectedResult) { _, selectedResult in
                 handleSearchResultSelection(selectedResult)
-            }
-            .onTapGesture {
-                // Dismiss search when tapping on map
-                if searchViewModel.isSearching {
-                    searchViewModel.cancelSearch()
-                }
             }
             .onChange(of: locationService.currentLocation) { _, newLocation in
                 // Update navigation engine with current location
@@ -236,40 +250,48 @@ struct MapView: View {
                 .animation(.easeInOut(duration: 0.3), value: showingRouteInfo)
             }
             
+            // Tapped Location Options
+            if showingTappedLocationOptions, let tapped = tappedLocation {
+                VStack {
+                    Spacer()
+                    
+                    TappedLocationPanel(
+                        tappedLocation: tapped,
+                        onGetDirections: {
+                            Task {
+                                await calculateRouteToDestination(tapped.mapItem)
+                                showingTappedLocationOptions = false
+                            }
+                        },
+                        onDismiss: {
+                            showingTappedLocationOptions = false
+                            tappedLocation = nil
+                        }
+                    )
+                    .padding(.horizontal)
+                    .padding(.bottom, 100)
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .animation(.easeInOut(duration: 0.3), value: showingTappedLocationOptions)
+            }
+            
             // Route Calculation Loading State
             if case .calculating = navigationEngine.navigationState {
                 VStack {
                     Spacer()
                     
-                    VStack(spacing: 16) {
-                        HStack {
-                            ProgressView()
-                                .scaleEffect(1.2)
-                            
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Calculating...")
-                                    .font(.headline)
-                                Text("Preparing navigation")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
+                    RouteCalculationView(
+                        onCancel: {
+                            navigationEngine.cancelRouteCalculation()
+                        },
+                        onTimeout: {
+                            navigationEngine.cancelRouteCalculation()
+                            // Show error message
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                handleRouteCalculationError(NavigationError.routeCalculationTimeout)
                             }
-                            
-                            Spacer()
-                            
-                            Button("Stop") {
-                                navigationEngine.cancelRouteCalculation()
-                            }
-                            .foregroundColor(.red)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .background(Color(.systemGray6))
-                            .cornerRadius(8)
                         }
-                        .padding()
-                        .background(Color(.systemBackground))
-                        .cornerRadius(12)
-                        .shadow(radius: 4)
-                    }
+                    )
                     .padding(.horizontal)
                     .padding(.bottom, 100)
                 }
@@ -396,6 +418,14 @@ struct MapView: View {
     }
     
     private func updateCameraPosition(for location: CLLocation) {
+        // Validate location coordinate
+        guard !location.coordinate.latitude.isNaN && !location.coordinate.longitude.isNaN &&
+              location.coordinate.latitude >= -90 && location.coordinate.latitude <= 90 &&
+              location.coordinate.longitude >= -180 && location.coordinate.longitude <= 180 else {
+            print("Invalid location coordinate: \(location.coordinate)")
+            return
+        }
+        
         withAnimation(.easeInOut(duration: 1.0)) {
             cameraPosition = .region(
                 MKCoordinateRegion(
@@ -427,6 +457,14 @@ struct MapView: View {
     private func updateSearchRegion() {
         guard let location = locationService.currentLocation else { return }
         
+        // Validate location coordinate
+        guard !location.coordinate.latitude.isNaN && !location.coordinate.longitude.isNaN &&
+              location.coordinate.latitude >= -90 && location.coordinate.latitude <= 90 &&
+              location.coordinate.longitude >= -180 && location.coordinate.longitude <= 180 else {
+            print("Invalid location coordinate for search region: \(location.coordinate)")
+            return
+        }
+        
         let region = MKCoordinateRegion(
             center: location.coordinate,
             latitudinalMeters: 10000, // 10km radius for search
@@ -440,6 +478,14 @@ struct MapView: View {
         selectedAnnotation = selectedResult
         
         if let result = selectedResult {
+            // Validate coordinate before using it
+            guard !result.coordinate.latitude.isNaN && !result.coordinate.longitude.isNaN &&
+                  result.coordinate.latitude >= -90 && result.coordinate.latitude <= 90 &&
+                  result.coordinate.longitude >= -180 && result.coordinate.longitude <= 180 else {
+                print("Invalid search result coordinate: \(result.coordinate)")
+                return
+            }
+            
             // Animate to the selected location
             withAnimation(.easeInOut(duration: 1.0)) {
                 cameraPosition = .region(
@@ -455,6 +501,14 @@ struct MapView: View {
     
     private func handleResultSelection(_ result: SearchResult) {
         selectedAnnotation = result
+        
+        // Validate coordinate before using it
+        guard !result.coordinate.latitude.isNaN && !result.coordinate.longitude.isNaN &&
+              result.coordinate.latitude >= -90 && result.coordinate.latitude <= 90 &&
+              result.coordinate.longitude >= -180 && result.coordinate.longitude <= 180 else {
+            print("Invalid search result coordinate: \(result.coordinate)")
+            return
+        }
         
         // Animate to the selected location
         withAnimation(.easeInOut(duration: 1.0)) {
@@ -500,7 +554,21 @@ struct MapView: View {
     
     private func fitRouteInView(_ route: MKRoute) {
         let rect = route.polyline.boundingMapRect
+        guard !rect.isNull && !rect.isEmpty else {
+            print("Invalid map rect for route")
+            return
+        }
+        
         let region = MKCoordinateRegion(rect)
+        
+        // Validate the resulting region
+        guard !region.center.latitude.isNaN && !region.center.longitude.isNaN &&
+              region.center.latitude >= -90 && region.center.latitude <= 90 &&
+              region.center.longitude >= -180 && region.center.longitude <= 180 &&
+              region.span.latitudeDelta > 0 && region.span.longitudeDelta > 0 else {
+            print("Invalid region calculated from route rect")
+            return
+        }
         
         // Add some padding around the route
         let paddedRegion = MKCoordinateRegion(
@@ -580,6 +648,146 @@ struct MapView: View {
         case .calculating:
             break
         }
+    }
+    
+    private func handleMapTap(at location: CGPoint, mapProxy: MapProxy) {
+        // Dismiss search when tapping on map
+        if searchViewModel.isSearching {
+            searchViewModel.cancelSearch()
+            return
+        }
+        
+        // Convert screen coordinates to map coordinates
+        guard let coordinate = mapProxy.convert(location, from: .local) else {
+            print("Failed to convert tap location to coordinate")
+            return
+        }
+        
+        // Validate coordinate
+        guard !coordinate.latitude.isNaN && !coordinate.longitude.isNaN &&
+              coordinate.latitude >= -90 && coordinate.latitude <= 90 &&
+              coordinate.longitude >= -180 && coordinate.longitude <= 180 else {
+            print("Invalid tapped coordinate: \(coordinate)")
+            return
+        }
+        
+        // Check if we're tapping near an existing annotation (within ~50 meters)
+        let tapThreshold: CLLocationDistance = 50 // meters
+        
+        // Check search result annotations
+        for result in searchViewModel.searchResults {
+            let annotationLocation = CLLocation(latitude: result.coordinate.latitude, longitude: result.coordinate.longitude)
+            let tapLocation = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+            
+            if annotationLocation.distance(from: tapLocation) < tapThreshold {
+                handleResultSelection(result)
+                return
+            }
+        }
+        
+        // Check if tapping near current tapped location
+        if let tapped = tappedLocation {
+            let existingLocation = CLLocation(latitude: tapped.coordinate.latitude, longitude: tapped.coordinate.longitude)
+            let tapLocation = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+            
+            if existingLocation.distance(from: tapLocation) < tapThreshold {
+                showingTappedLocationOptions = true
+                return
+            }
+        }
+        
+        // Create new tapped location
+        tappedLocation = TappedLocation(coordinate: coordinate)
+        
+        // Clear any selected search result annotation
+        selectedAnnotation = nil
+        
+        // Show options for the tapped location
+        showingTappedLocationOptions = true
+        
+        print("📍 Map tapped at: \(coordinate.latitude), \(coordinate.longitude)")
+    }
+}
+
+// MARK: - Route Calculation View
+
+struct RouteCalculationView: View {
+    let onCancel: () -> Void
+    let onTimeout: () -> Void
+    
+    @State private var timeRemaining: Double = 15.0
+    @State private var timer: Timer?
+    
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack {
+                // Progress indicator with countdown
+                ZStack {
+                    Circle()
+                        .stroke(Color.gray.opacity(0.3), lineWidth: 4)
+                        .frame(width: 40, height: 40)
+                    
+                    Circle()
+                        .trim(from: 0, to: CGFloat(1.0 - (timeRemaining / 15.0)))
+                        .stroke(Color.blue, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                        .frame(width: 40, height: 40)
+                        .rotationEffect(.degrees(-90))
+                        .animation(.linear(duration: 0.1), value: timeRemaining)
+                    
+                    Text("\(Int(timeRemaining))")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(.blue)
+                }
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Calculating Route...")
+                        .font(.headline)
+                    Text("Finding the best path for you")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                
+                Spacer()
+                
+                Button("Cancel") {
+                    stopTimer()
+                    onCancel()
+                }
+                .foregroundColor(.red)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color(.systemGray6))
+                .cornerRadius(8)
+            }
+            .padding()
+            .background(Color(.systemBackground))
+            .cornerRadius(12)
+            .shadow(radius: 4)
+        }
+        .onAppear {
+            startTimer()
+        }
+        .onDisappear {
+            stopTimer()
+        }
+    }
+    
+    private func startTimer() {
+        timeRemaining = 15.0
+        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+            timeRemaining -= 0.1
+            
+            if timeRemaining <= 0 {
+                stopTimer()
+                onTimeout()
+            }
+        }
+    }
+    
+    private func stopTimer() {
+        timer?.invalidate()
+        timer = nil
     }
 }
 

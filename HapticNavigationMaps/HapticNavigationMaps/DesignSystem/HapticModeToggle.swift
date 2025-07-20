@@ -18,7 +18,7 @@ struct HapticModeToggle: View {
                             .font(.system(size: 16, weight: .medium))
                         
                         Text(mode.displayName)
-                            .font(.subheadline)
+                            .accessibleFont(.subheadline)
                             .fontWeight(.medium)
                     }
                     .tag(mode)
@@ -28,8 +28,17 @@ struct HapticModeToggle: View {
             .onChange(of: currentMode) { _, newMode in
                 hapticImpact.impactOccurred()
                 onModeChanged(newMode)
+                
+                // Announce mode change for accessibility
+                UIAccessibility.post(
+                    notification: .announcement, 
+                    argument: "Navigation mode changed to \(newMode.displayName)"
+                )
             }
             .disabled(!isHapticCapable && currentMode == .haptic)
+            .accessibilityLabel("Navigation mode selector")
+            .accessibilityHint("Choose between visual and haptic navigation modes")
+            .accessibilityValue("\(currentMode.displayName) mode selected")
             
             // Haptic capability warning
             if !isHapticCapable {
@@ -116,16 +125,21 @@ struct CompactHapticModeToggle: View {
                     .font(.system(size: 16, weight: .medium))
                 
                 Text(currentMode.displayName)
-                    .font(.subheadline)
+                    .accessibleFont(.subheadline)
                     .fontWeight(.medium)
             }
             .foregroundColor(currentMode == .haptic ? .purple : .blue)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
-            .background((currentMode == .haptic ? Color.purple : Color.blue).opacity(0.1))
+            .accessibleBackgroundColor((currentMode == .haptic ? Color.purple : Color.blue).opacity(0.1))
             .cornerRadius(16)
+            .accessibleBorder(currentMode == .haptic ? .purple : .blue)
         }
         .disabled(!isHapticCapable && currentMode == .haptic)
+        .frame(minWidth: 44, minHeight: 44)
+        .accessibilityLabel("Navigation mode toggle")
+        .accessibilityHint("Double tap to switch between visual and haptic navigation modes")
+        .accessibilityValue("Currently \(currentMode.displayName) mode")
     }
     
     private func toggleMode() {
@@ -134,11 +148,18 @@ struct CompactHapticModeToggle: View {
         
         // Only switch to haptic if device is capable
         if newMode == .haptic && !isHapticCapable {
+            UIAccessibility.post(notification: .announcement, argument: "Haptic mode not available on this device")
             return
         }
         
         currentMode = newMode
         onModeChanged(newMode)
+        
+        // Provide accessibility feedback
+        UIAccessibility.post(
+            notification: .announcement, 
+            argument: "Navigation mode changed to \(newMode.displayName)"
+        )
     }
 }
 

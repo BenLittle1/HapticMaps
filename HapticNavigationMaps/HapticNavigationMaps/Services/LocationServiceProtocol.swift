@@ -11,8 +11,13 @@ protocol LocationServiceProtocol: ObservableObject {
     var isGPSSignalStrong: Bool { get }
     var locationAccuracy: CLLocationAccuracy { get }
     
+    // Performance monitoring
+    var currentNavigationState: NavigationState { get }
+    var currentUpdateFrequency: Double { get }
+    
     func requestLocationPermission()
     func requestAlwaysPermissionIfNeeded()
     func startLocationUpdates()
     func stopLocationUpdates()
+    func updateNavigationState(_ state: NavigationState)
 }
